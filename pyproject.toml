@@ -1,0 +1,22 @@
+[project]
+name = "auto-triage"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = "==3.12.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "langgraph>=1.1.10",
+    "mcp>=1.0.0",
+    "openai>=1.99.0",
+    "pydantic-settings>=2.8.0",
+    "uvicorn>=0.34.0",
+]
+
+[project.scripts]
+auto-triage = "main:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+]
