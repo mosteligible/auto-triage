@@ -92,6 +92,12 @@ class Settings(BaseSettings):
             return f"https://github.com/{self.github_repo}.git"
         return None
 
+    @property
+    def effective_workspace_dir(self) -> Path:
+        if self.workspace_dir.is_absolute():
+            return self.workspace_dir
+        return Path("/tmp/auto-triage-work") / self.workspace_dir
+
 
 @lru_cache
 def get_settings() -> Settings:

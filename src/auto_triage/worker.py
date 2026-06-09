@@ -14,6 +14,7 @@ from auto_triage.database import AsyncSessionLocal
 from auto_triage.models import (
     EvidenceBundle,
     GitHubIssueLink,
+    GitHubPullRequestLink,
     Incident,
     IncidentStatus,
     JobStatus,
@@ -25,6 +26,24 @@ from auto_triage.services.github import GitHubClient
 from auto_triage.services.logfire import LogfireClient
 
 logger = logging.getLogger(__name__)
+
+
+async def recover_interrupted_jobs() -> None:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(TriageJob).where(TriageJob.status == JobStatus.RUNNING.value)
+        )
+        jobs = result.scalars().all()
+        if not jobs:
+            return
+
+        for job in jobs:
+            job.status = JobStatus.PENDING.value
+            job.last_error = "Recovered from interrupted worker process; retrying."
+            incident = await session.get(Incident, job.incident_id)
+            if incident is not None and incident.status == IncidentStatus.IN_PROGRESS.value:
+                incident.status = IncidentStatus.QUEUED.value
+        await session.commit()
 
 
 class TriageWorker:
@@ -139,6 +158,7 @@ class TriageWorker:
 
             existing_issue = await self._find_existing_issue(session, incident.fingerprint)
             github = GitHubClient(self.settings)
+            issue_url: str | None = None
             if existing_issue is None:
                 issue_response = await github.create_issue(
                     incident.id,
@@ -155,6 +175,7 @@ class TriageWorker:
                         state=issue_response.get("state", "open"),
                     )
                 )
+                issue_url = issue_response["html_url"]
                 incident.status = IncidentStatus.ISSUE_OPENED.value
             else:
                 await github.update_issue(
@@ -164,6 +185,7 @@ class TriageWorker:
                     agent_report,
                     evidence_payload,
                 )
+                issue_url = existing_issue.issue_url
                 if existing_issue.incident_id != incident.id:
                     session.add(
                         GitHubIssueLink(
@@ -175,6 +197,57 @@ class TriageWorker:
                         )
                     )
                 incident.status = IncidentStatus.ISSUE_UPDATED.value
+
+            existing_pull_request = await self._find_existing_pull_request(
+                session, incident.fingerprint
+            )
+            pull_response = await github.create_pull_request(
+                incident.id,
+                normalized,
+                agent_report,
+                evidence_payload,
+                issue_url=issue_url,
+            )
+            pull_head = pull_response.get("head") or {}
+            pull_base = pull_response.get("base") or {}
+            if existing_pull_request is None:
+                session.add(
+                    GitHubPullRequestLink(
+                        incident_id=incident.id,
+                        repo=self.settings.github_repo or "",
+                        branch=pull_head.get("ref", ""),
+                        base_branch=pull_base.get("ref", self.settings.github_default_branch),
+                        pull_number=pull_response["number"],
+                        pull_url=pull_response["html_url"],
+                        state=pull_response.get("state", "open"),
+                    )
+                )
+                incident.status = IncidentStatus.PULL_REQUEST_OPENED.value
+            else:
+                existing_pull_request.branch = pull_head.get(
+                    "ref", existing_pull_request.branch
+                )
+                existing_pull_request.base_branch = pull_base.get(
+                    "ref", existing_pull_request.base_branch
+                )
+                existing_pull_request.pull_number = pull_response["number"]
+                existing_pull_request.pull_url = pull_response["html_url"]
+                existing_pull_request.state = pull_response.get(
+                    "state", existing_pull_request.state
+                )
+                if existing_pull_request.incident_id != incident.id:
+                    session.add(
+                        GitHubPullRequestLink(
+                            incident_id=incident.id,
+                            repo=existing_pull_request.repo,
+                            branch=existing_pull_request.branch,
+                            base_branch=existing_pull_request.base_branch,
+                            pull_number=existing_pull_request.pull_number,
+                            pull_url=existing_pull_request.pull_url,
+                            state=existing_pull_request.state,
+                        )
+                    )
+                incident.status = IncidentStatus.PULL_REQUEST_UPDATED.value
 
             job = await session.get(TriageJob, job_id)
             if job is not None:
@@ -214,6 +287,18 @@ class TriageWorker:
             .join(Incident, Incident.id == GitHubIssueLink.incident_id)
             .where(Incident.fingerprint == fingerprint)
             .order_by(GitHubIssueLink.created_at)
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def _find_existing_pull_request(
+        self, session, fingerprint: str
+    ) -> GitHubPullRequestLink | None:
+        result = await session.execute(
+            select(GitHubPullRequestLink)
+            .join(Incident, Incident.id == GitHubPullRequestLink.incident_id)
+            .where(Incident.fingerprint == fingerprint)
+            .order_by(GitHubPullRequestLink.created_at)
             .limit(1)
         )
         return result.scalar_one_or_none()

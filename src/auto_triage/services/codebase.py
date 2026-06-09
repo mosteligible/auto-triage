@@ -55,8 +55,9 @@ class CodebaseInspector:
                 "matches": [],
             }
 
-        self.settings.workspace_dir.mkdir(parents=True, exist_ok=True)
-        repo_path = self.settings.workspace_dir / incident_id
+        workspace_dir = self.settings.effective_workspace_dir
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        repo_path = workspace_dir / incident_id
         if repo_path.exists():
             shutil.rmtree(repo_path)
 

@@ -18,7 +18,7 @@ from auto_triage.schemas import (
 )
 from auto_triage.storage import enqueue_incident, get_incident_detail
 from auto_triage.webhooks.logfire import normalize_logfire_payload, normalize_manual_incident
-from auto_triage.worker import TriageWorker
+from auto_triage.worker import TriageWorker, recover_interrupted_jobs
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,7 @@ async def lifespan(app: FastAPI):
     await init_db()
     worker: TriageWorker | None = None
     if settings.run_worker:
+        await recover_interrupted_jobs()
         worker = TriageWorker(settings)
         worker.start()
         app.state.worker = worker

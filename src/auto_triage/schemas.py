@@ -86,3 +86,4 @@ class IncidentDetail(BaseModel):
     jobs: list[dict[str, Any]]
     evidence: dict[str, Any] | None
     github_issue: dict[str, Any] | None
+    github_pull_request: dict[str, Any] | None = None

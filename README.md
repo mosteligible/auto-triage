@@ -1,7 +1,8 @@
 # Auto Triage
 
 FastAPI service that receives Logfire alert webhooks, enriches incidents with Logfire records,
-asks a Pydantic AI agent for a diagnosis and fix plan, then creates or updates a GitHub issue.
+asks a Pydantic AI agent for a diagnosis and fix plan, then creates or updates a GitHub issue
+and pull request.
 
 ## First-Cut Scope
 
@@ -11,10 +12,10 @@ asks a Pydantic AI agent for a diagnosis and fix plan, then creates or updates a
 - Queries Logfire's `/v2/query` API with a read token.
 - Clones one configured GitHub repo and performs static source inspection only.
 - Uses Pydantic AI with per-request OpenAI or Azure OpenAI provider selection.
-- Creates or updates GitHub issues through a fine-grained PAT.
+- Creates or updates GitHub issues and pull requests through a fine-grained PAT.
 
-PR creation, multi-repo routing, Logfire alert provisioning, and target-repo test execution are
-intentionally left out of this first implementation.
+Multi-repo routing, Logfire alert provisioning, and target-repo test execution are intentionally
+left out of this first implementation.
 
 ## Setup
 
@@ -50,8 +51,10 @@ The server listens on `http://127.0.0.1:8000` by default.
   with `/openai/v1`.
 - `AZURE_OPENAI_DEPLOYMENT`: Azure OpenAI deployment name for Logfire webhooks by default and
   for requests with `?ai_provider=azure`.
-- `GITHUB_TOKEN`: fine-grained PAT with Issues read/write access to `GITHUB_REPO`.
+- `GITHUB_TOKEN`: fine-grained PAT with Issues, Contents, and Pull requests read/write access to
+  `GITHUB_REPO`.
 - `GITHUB_REPO`: target repo in `owner/name` form.
+- `GITHUB_DEFAULT_BRANCH`: base branch for clone, remediation branches, and pull requests.
 - `TARGET_REPO_URL`: clone URL for static source inspection. Defaults to the GitHub repo URL.
 
 Webhook token validation is currently disabled in the FastAPI route. Put the service behind a
@@ -84,7 +87,7 @@ curl -X POST 'http://127.0.0.1:8000/webhooks/logfire?ai_provider=openai' \
 ```
 
 The response contains an `incident_id`, `job_id`, and status. The background worker then enriches
-the incident, runs the AI agent, and creates or updates a GitHub issue.
+the incident, runs the AI agent, and creates or updates a GitHub issue and pull request.
 
 ### Manual Trigger
 
@@ -154,6 +157,7 @@ Slack-shaped payloads and direct record-shaped payloads.
 ## Runtime State
 
 - SQLite DB: `data/auto_triage.db`
-- Temporary clones: `.auto-triage-work/`
+- Temporary clones: `/tmp/auto-triage-work/...` for relative `WORKSPACE_DIR` values. This keeps
+  Uvicorn `--reload` from restarting when the worker clones the target repo.
 
 Both are ignored by git.

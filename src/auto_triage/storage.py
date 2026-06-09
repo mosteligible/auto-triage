@@ -15,6 +15,8 @@ async def enqueue_incident(
         select(Incident).where(Incident.fingerprint == normalized.fingerprint)
     )
     incident = result.scalar_one_or_none()
+    if incident is None:
+        incident = await _find_semantic_duplicate(session, normalized)
     duplicate = incident is not None
 
     if incident is None:
@@ -36,6 +38,7 @@ async def enqueue_incident(
         await session.flush()
     else:
         incident.occurrence_count += 1
+        incident.fingerprint = normalized.fingerprint
         incident.title = normalized.title
         incident.alert_kind = normalized.alert_kind
         incident.service_name = normalized.service_name
@@ -55,6 +58,50 @@ async def enqueue_incident(
     return incident, job, duplicate
 
 
+async def _find_semantic_duplicate(
+    session: AsyncSession,
+    normalized: NormalizedIncident,
+) -> Incident | None:
+    result = await session.execute(
+        select(Incident)
+        .where(Incident.source == normalized.source)
+        .where(Incident.alert_kind == normalized.alert_kind)
+        .order_by(Incident.updated_at.desc())
+        .limit(100)
+    )
+    candidates = result.scalars().all()
+    normalized_route = _canonical_route(normalized.route or normalized.span_name)
+    normalized_status_family = _status_family(normalized.status_code)
+    for candidate in candidates:
+        if candidate.service_name and normalized.service_name:
+            if candidate.service_name != normalized.service_name:
+                continue
+        elif candidate.service_name or normalized.service_name:
+            continue
+
+        if _canonical_route(candidate.route) != normalized_route:
+            continue
+        if (candidate.exception_type or "") != (normalized.exception_type or ""):
+            continue
+        if _status_family(candidate.status_code) != normalized_status_family:
+            continue
+        return candidate
+    return None
+
+
+def _canonical_route(route: str | None) -> str:
+    if not route:
+        return ""
+    method, _, path = route.partition(" ")
+    if method.isalpha() and path.startswith("/"):
+        return path
+    return route
+
+
+def _status_family(status_code: int | None) -> str:
+    return f"{status_code // 100}xx" if status_code else ""
+
+
 async def get_incident_detail(session: AsyncSession, incident_id: str) -> IncidentDetail | None:
     result = await session.execute(
         select(Incident)
@@ -63,6 +110,7 @@ async def get_incident_detail(session: AsyncSession, incident_id: str) -> Incide
             selectinload(Incident.jobs),
             selectinload(Incident.evidence_bundle),
             selectinload(Incident.github_issue),
+            selectinload(Incident.github_pull_request),
         )
     )
     incident = result.scalar_one_or_none()
@@ -90,6 +138,7 @@ async def get_incident_detail(session: AsyncSession, incident_id: str) -> Incide
         ],
         evidence=_evidence_payload(incident.evidence_bundle),
         github_issue=_issue_payload(incident.github_issue),
+        github_pull_request=_pull_request_payload(incident.github_pull_request),
     )
 
 
@@ -113,4 +162,18 @@ def _issue_payload(issue: GitHubIssueLink | None) -> dict | None:
         "issue_url": issue.issue_url,
         "state": issue.state,
         "updated_at": issue.updated_at,
+    }
+
+
+def _pull_request_payload(pull_request) -> dict | None:
+    if pull_request is None:
+        return None
+    return {
+        "repo": pull_request.repo,
+        "branch": pull_request.branch,
+        "base_branch": pull_request.base_branch,
+        "pull_number": pull_request.pull_number,
+        "pull_url": pull_request.pull_url,
+        "state": pull_request.state,
+        "updated_at": pull_request.updated_at,
     }

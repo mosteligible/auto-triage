@@ -16,7 +16,12 @@ def normalize_logfire_payload(payload: dict[str, Any]) -> NormalizedIncident:
     observed_text = _flatten_text(payload)
     direct_record = _first_record(payload)
 
-    trace_id = _as_str(_find_first_key(payload, {"trace_id", "traceid"}))
+    trace_id = _as_str(
+        _coalesce(
+            _find_first_key(payload, {"trace_id", "traceid"}),
+            direct_record.get("trace_id") if direct_record else None,
+        )
+    )
     if trace_id is None:
         trace_id_match = TRACE_ID_RE.search(observed_text)
         trace_id = trace_id_match.group(0) if trace_id_match else None
@@ -41,9 +46,17 @@ def normalize_logfire_payload(payload: dict[str, Any]) -> NormalizedIncident:
             direct_record.get("span_name") if direct_record else None,
         )
     )
-    exception_type = _as_str(_find_first_key(payload, {"exception_type", "exception.type"}))
+    exception_type = _as_str(
+        _coalesce(
+            _find_first_key(payload, {"exception_type", "exception.type"}),
+            direct_record.get("exception_type") if direct_record else None,
+        )
+    )
     exception_message = _as_str(
-        _find_first_key(payload, {"exception_message", "exception.message"})
+        _coalesce(
+            _find_first_key(payload, {"exception_message", "exception.message"}),
+            direct_record.get("exception_message") if direct_record else None,
+        )
     )
     exception_stacktrace = _as_str(
         _find_first_key(payload, {"exception_stacktrace", "exception.stacktrace", "stacktrace"})
@@ -52,6 +65,8 @@ def normalize_logfire_payload(payload: dict[str, Any]) -> NormalizedIncident:
         _coalesce(
             _find_first_key(payload, {"http_response_status_code", "status_code"}),
             _find_nested(payload, ("attributes", "http.response.status_code")),
+            direct_record.get("http_response_status_code") if direct_record else None,
+            direct_record.get("status_code") if direct_record else None,
         )
     )
     alert_url = _as_str(
@@ -142,14 +157,14 @@ def fingerprint_values(
     top_frame: str | None,
 ) -> str:
     status_family = f"{status_code // 100}xx" if status_code else ""
+    route_key = _route_without_method(route) or route or ""
     basis = {
         "source": source,
         "alert_kind": alert_kind,
         "service_name": service_name or "",
-        "route": route or "",
+        "route": route_key,
         "exception_type": exception_type or "",
         "status_family": status_family,
-        "top_frame": top_frame or "",
     }
     return hashlib.sha256(json.dumps(basis, sort_keys=True).encode("utf-8")).hexdigest()
 
@@ -190,6 +205,10 @@ def _title_from_payload(
 
 
 def _first_record(payload: dict[str, Any]) -> dict[str, Any]:
+    table_record = _first_table_record(payload)
+    if table_record:
+        return table_record
+
     for key in ("record", "records", "row", "rows", "data"):
         value = payload.get(key)
         if isinstance(value, dict):
@@ -197,6 +216,32 @@ def _first_record(payload: dict[str, Any]) -> dict[str, Any]:
         if isinstance(value, list) and value and isinstance(value[0], dict):
             return value[0]
     return {}
+
+
+def _first_table_record(payload: dict[str, Any]) -> dict[str, Any]:
+    columns = payload.get("columns")
+    data = payload.get("data")
+    if not isinstance(columns, list) or not isinstance(data, list) or not data:
+        return {}
+
+    names: list[str] = []
+    for column in columns:
+        if isinstance(column, dict):
+            name = column.get("name")
+        else:
+            name = column
+        if not isinstance(name, str):
+            return {}
+        names.append(name)
+
+    first_row = data[0]
+    if not isinstance(first_row, list):
+        return {}
+    return {
+        name: first_row[index]
+        for index, name in enumerate(names)
+        if index < len(first_row)
+    }
 
 
 def _safe_attributes(payload: dict[str, Any]) -> dict[str, Any]:
@@ -278,6 +323,15 @@ def _coalesce(*values: Any) -> Any:
         if value not in (None, ""):
             return value
     return None
+
+
+def _route_without_method(route: str | None) -> str | None:
+    if not route:
+        return None
+    method, _, path = route.partition(" ")
+    if method.isalpha() and path.startswith("/"):
+        return path
+    return route
 
 
 def _as_str(value: Any) -> str | None:

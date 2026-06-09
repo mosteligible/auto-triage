@@ -20,6 +20,8 @@ class IncidentStatus(StrEnum):
     IN_PROGRESS = "in_progress"
     ISSUE_OPENED = "issue_opened"
     ISSUE_UPDATED = "issue_updated"
+    PULL_REQUEST_OPENED = "pull_request_opened"
+    PULL_REQUEST_UPDATED = "pull_request_updated"
     FAILED = "failed"
 
 
@@ -61,6 +63,9 @@ class Incident(Base):
         back_populates="incident", cascade="all, delete-orphan"
     )
     github_issue: Mapped[GitHubIssueLink | None] = relationship(
+        back_populates="incident", cascade="all, delete-orphan"
+    )
+    github_pull_request: Mapped[GitHubPullRequestLink | None] = relationship(
         back_populates="incident", cascade="all, delete-orphan"
     )
 
@@ -111,3 +116,22 @@ class GitHubIssueLink(Base):
     )
 
     incident: Mapped[Incident] = relationship(back_populates="github_issue")
+
+
+class GitHubPullRequestLink(Base):
+    __tablename__ = "github_pull_request_links"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    incident_id: Mapped[str] = mapped_column(ForeignKey("incidents.id"), unique=True, index=True)
+    repo: Mapped[str] = mapped_column(String(256))
+    branch: Mapped[str] = mapped_column(String(256))
+    base_branch: Mapped[str] = mapped_column(String(256))
+    pull_number: Mapped[int] = mapped_column(Integer)
+    pull_url: Mapped[str] = mapped_column(String(1024))
+    state: Mapped[str] = mapped_column(String(64), default="open")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    incident: Mapped[Incident] = relationship(back_populates="github_pull_request")
