@@ -1,0 +1,40 @@
+[project]
+name = "auto-triage"
+version = "0.1.0"
+description = "FastAPI service that turns Logfire alerts into AI-assisted GitHub triage issues."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Amit Sharma" }]
+dependencies = [
+    "aiosqlite>=0.20.0",
+    "fastapi>=0.116.0",
+    "httpx>=0.28.1",
+    "logfire[fastapi,httpx,sqlalchemy]>=4.0.0",
+    "pydantic-ai>=1.0.0",
+    "pydantic-settings>=2.10.0",
+    "sqlalchemy[asyncio]>=2.0.41",
+    "uvicorn[standard]>=0.35.0",
+]
+
+[project.scripts]
+auto-triage = "auto_triage.__main__:main"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.12.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/auto_triage"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

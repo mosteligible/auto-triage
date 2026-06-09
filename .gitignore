@@ -214,5 +214,9 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+# Auto-triage runtime state
+data/
+.auto-triage-work/
+
 # Streamlit
 .streamlit/secrets.toml
