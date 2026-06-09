@@ -34,9 +34,13 @@ _instrument_app(app)
 
 
 @app.api_route("/lean", methods=["GET", "POST"])
-async def lean() -> None:
+async def lean() -> dict[str, str]:
     print("yeah this is lean endpoint", flush=True)
-    raise RuntimeError("Intentional failure from /lean endpoint")
+    return {
+        "status": "ok",
+        "endpoint": "lean",
+        "message": "Lean endpoint remediated by auto-triage",
+    }
 
 
 @app.api_route("/property", methods=["GET", "POST"])
