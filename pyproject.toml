@@ -8,11 +8,13 @@ license = { text = "MIT" }
 authors = [{ name = "Amit Sharma" }]
 dependencies = [
     "aiosqlite>=0.20.0",
+    "asyncpg>=0.31.0",
     "fastapi>=0.116.0",
     "httpx>=0.28.1",
     "logfire[fastapi,httpx,sqlalchemy]>=4.0.0",
     "pydantic-ai>=1.0.0",
     "pydantic-settings>=2.10.0",
+    "redis>=5.0.0",
     "sqlalchemy[asyncio]>=2.0.41",
     "uvicorn[standard]>=0.35.0",
 ]
@@ -30,7 +32,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/auto_triage"]
+packages = ["auto_triage"]
 
 [tool.ruff]
 line-length = 100

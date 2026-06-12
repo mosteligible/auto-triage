@@ -72,7 +72,10 @@ async def _find_semantic_duplicate(
     candidates = result.scalars().all()
     normalized_route = _canonical_route(normalized.route or normalized.span_name)
     normalized_status_family = _status_family(normalized.status_code)
+    normalized_user_key = _normalized_user_key(normalized)
     for candidate in candidates:
+        if _incident_user_key(candidate) != normalized_user_key:
+            continue
         if candidate.service_name and normalized.service_name:
             if candidate.service_name != normalized.service_name:
                 continue
@@ -100,6 +103,19 @@ def _canonical_route(route: str | None) -> str:
 
 def _status_family(status_code: int | None) -> str:
     return f"{status_code // 100}xx" if status_code else ""
+
+
+def _normalized_user_key(normalized: NormalizedIncident) -> str:
+    return normalized.webhook_id or normalized.user_config_id or normalized.user_id or ""
+
+
+def _incident_user_key(incident: Incident) -> str:
+    normalized = incident.normalized if isinstance(incident.normalized, dict) else {}
+    return (
+        str(normalized.get("webhook_id") or "")
+        or str(normalized.get("user_config_id") or "")
+        or str(normalized.get("user_id") or "")
+    )
 
 
 async def get_incident_detail(session: AsyncSession, incident_id: str) -> IncidentDetail | None:

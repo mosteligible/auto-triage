@@ -32,6 +32,53 @@ class JobStatus(StrEnum):
     FAILED = "failed"
 
 
+class TriageUser(Base):
+    __tablename__ = "triage_users"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    display_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    password_hash: Mapped[str] = mapped_column(String(512))
+    auth_token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    repository_config: Mapped[UserRepositoryConfig | None] = relationship(
+        back_populates="user", cascade="all, delete-orphan", uselist=False
+    )
+
+
+class UserRepositoryConfig(Base):
+    __tablename__ = "user_repository_configs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("triage_users.id"), unique=True, index=True)
+    webhook_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, default=new_id)
+    github_owner: Mapped[str] = mapped_column(String(128))
+    github_repo_name: Mapped[str] = mapped_column(String(128))
+    github_token: Mapped[str] = mapped_column(Text)
+    github_default_branch: Mapped[str] = mapped_column(String(256), default="main")
+    target_repo_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    logfire_base_url: Mapped[str] = mapped_column(
+        String(512), default="https://logfire-us.pydantic.dev"
+    )
+    logfire_read_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    logfire_project_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    logfire_service_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    logfire_route: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    alert_trigger: Mapped[str] = mapped_column(String(64), default="http_5xx")
+    alert_mode: Mapped[str] = mapped_column(String(64), default="starts_having_results")
+    ai_provider: Mapped[str] = mapped_column(String(32), default="azure")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    user: Mapped[TriageUser] = relationship(back_populates="repository_config")
+
+
 class Incident(Base):
     __tablename__ = "incidents"
 

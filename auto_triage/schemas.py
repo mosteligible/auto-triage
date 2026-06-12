@@ -4,6 +4,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 AIProvider = Literal["openai", "azure"]
+AlertTrigger = Literal["exception", "http_5xx", "error_rate"]
+AlertMode = Literal["has_results", "starts_having_results", "results_change"]
 
 
 class TriageQuery(BaseModel):
@@ -22,9 +24,19 @@ class WebhookTriageQuery(BaseModel):
     )
 
 
+class UserWebhookTriageQuery(BaseModel):
+    ai_provider: AIProvider | None = Field(
+        default=None,
+        description="Optional override for the AI provider configured for this user's webhook.",
+    )
+
+
 class NormalizedIncident(BaseModel):
     source: str = "logfire"
     ai_provider: AIProvider = "openai"
+    user_id: str | None = None
+    user_config_id: str | None = None
+    webhook_id: str | None = None
     alert_kind: str
     title: str
     fingerprint: str
@@ -61,6 +73,72 @@ class WebhookAck(BaseModel):
     job_id: str
     status: str
     duplicate: bool
+
+
+class AuthLoginIn(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=8, max_length=256)
+    display_name: str | None = Field(default=None, max_length=256)
+
+
+class AuthLoginOut(BaseModel):
+    user_id: str
+    email: str
+    display_name: str | None
+    auth_token: str
+
+
+class UserRepositoryConfigIn(BaseModel):
+    github_owner: str = Field(min_length=1, max_length=128)
+    github_repo_name: str = Field(min_length=1, max_length=128)
+    github_token: str = Field(min_length=1)
+    github_default_branch: str = Field(default="main", min_length=1, max_length=256)
+    target_repo_url: str | None = Field(default=None, max_length=1024)
+    logfire_base_url: str = Field(default="https://logfire-us.pydantic.dev", max_length=512)
+    logfire_read_token: str | None = None
+    logfire_project_url: str | None = Field(default=None, max_length=1024)
+    logfire_service_name: str | None = Field(default=None, max_length=256)
+    logfire_route: str | None = Field(default=None, max_length=512)
+    alert_trigger: AlertTrigger = "http_5xx"
+    alert_mode: AlertMode = "starts_having_results"
+    ai_provider: AIProvider = "azure"
+
+
+class UserRepositoryConfigOut(BaseModel):
+    id: str
+    webhook_id: str
+    webhook_path: str
+    github_owner: str
+    github_repo_name: str
+    github_repo: str
+    github_default_branch: str
+    target_repo_url: str | None
+    github_token_configured: bool
+    logfire_base_url: str
+    logfire_read_token_configured: bool
+    logfire_project_url: str | None
+    logfire_service_name: str | None
+    logfire_route: str | None
+    alert_trigger: str
+    alert_mode: str
+    ai_provider: AIProvider
+    created_at: datetime | None
+    updated_at: datetime | None
+
+
+class UserProfileOut(BaseModel):
+    user_id: str
+    email: str
+    display_name: str | None
+    repository_config: UserRepositoryConfigOut | None
+
+
+class AlertTestIn(BaseModel):
+    service_name: str | None = None
+    route: str | None = None
+    status_code: int = 500
+    exception_type: str = "RuntimeError"
+    exception_message: str = "Intentional setup smoke test"
 
 
 class TriageReport(BaseModel):

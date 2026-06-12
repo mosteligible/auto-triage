@@ -12,7 +12,7 @@ class Base(DeclarativeBase):
 
 
 settings = get_settings()
-engine = create_async_engine(settings.database_url, future=True)
+engine = create_async_engine(settings.effective_database_url, future=True)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
@@ -27,7 +27,7 @@ def _sqlite_file_path(database_url: str) -> Path | None:
 
 
 async def init_db() -> None:
-    sqlite_path = _sqlite_file_path(settings.database_url)
+    sqlite_path = _sqlite_file_path(str(settings.effective_database_url))
     if sqlite_path is not None:
         sqlite_path.parent.mkdir(parents=True, exist_ok=True)
 

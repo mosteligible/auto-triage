@@ -8,7 +8,8 @@ and pull request.
 
 - Receives Logfire alert webhooks at `POST /webhooks/logfire`.
 - Supports exception and HTTP 5xx/error-rate style alerts.
-- Uses SQLite for durable incident/job state.
+- Uses Postgres for durable incident/job state in Docker Compose.
+- Uses Redis as an optional Logfire evidence cache.
 - Queries Logfire's `/v2/query` API with a read token.
 - Clones one configured GitHub repo and performs static source inspection only.
 - Uses Pydantic AI with per-request OpenAI or Azure OpenAI provider selection.
@@ -33,9 +34,42 @@ uv run uvicorn auto_triage.app:app --reload
 
 The server listens on `http://127.0.0.1:8000` by default.
 
+For the full local stack with Postgres, Redis, auto-triage, and the test app:
+
+```bash
+docker compose up --build
+```
+
+The Compose stack exposes:
+
+- Auto-triage: `http://127.0.0.1:8001`
+- Test app: `http://127.0.0.1:8000`
+- Postgres: `127.0.0.1:5432`
+- Redis: `127.0.0.1:6379`
+
+## Setup UI
+
+The setup console lives in `triage-ui` and uses Next.js app router.
+
+```bash
+cd triage-ui
+npm install
+npm run dev
+```
+
+It supports operator login, saving a user's repository/Logfire setup, receiving a generated
+per-user webhook path, and sending a setup test alert through the FastAPI service.
+
 ## Required Configuration
 
 - `LOGFIRE_BASE_URL`: `https://logfire-us.pydantic.dev` or `https://logfire-eu.pydantic.dev`.
+- `DATABASE_URL`: optional SQLAlchemy async URL override. If omitted, the app builds a
+  Postgres URL from the `POSTGRES_*` settings, falling back to local SQLite only when Postgres
+  settings are absent.
+- `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`:
+  Postgres host, port, username, password, and database.
+- `REDIS_CACHE_ENABLED`: enables Redis caching for Logfire evidence lookups.
+- `REDIS_USERNAME`, `REDIS_PASSWORD`: Redis ACL credentials used by Docker Compose and the app.
 - `LOGFIRE_READ_TOKEN`: read token created in Logfire project settings.
 - `OPENAI_API_KEY`: used for manual triggers by default and for webhook requests with
   `?ai_provider=openai`.
@@ -88,6 +122,15 @@ curl -X POST 'http://127.0.0.1:8000/webhooks/logfire?ai_provider=openai' \
 
 The response contains an `incident_id`, `job_id`, and status. The background worker then enriches
 the incident, runs the AI agent, and creates or updates a GitHub issue and pull request.
+
+Per-user setup webhooks are created after saving repository setup through the UI/API:
+
+```bash
+POST /webhooks/users/{webhook_id}/logfire
+```
+
+Incidents received through this path use the saved GitHub owner/repository/token, branch, target
+repo URL, and Logfire settings from the user's repository configuration.
 
 ### Manual Trigger
 

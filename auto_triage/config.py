@@ -3,6 +3,7 @@ from pathlib import Path
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy import URL
 
 
 class Settings(BaseSettings):
@@ -10,12 +11,27 @@ class Settings(BaseSettings):
 
     app_name: str = "auto-triage"
     environment: str = "local"
-    database_url: str = "sqlite+aiosqlite:///./data/auto_triage.db"
+    database_url: str | None = None
+    postgres_host: str | None = None
+    postgres_port: int = 5432
+    postgres_user: str | None = None
+    postgres_password: SecretStr | None = None
+    postgres_db: str | None = None
     run_worker: bool = True
     worker_poll_interval_seconds: float = 2.0
     max_worker_attempts: int = 3
 
     webhook_token: SecretStr | None = None
+
+    redis_cache_enabled: bool = False
+    redis_url: str | None = None
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    redis_db: int = 0
+    redis_username: str | None = None
+    redis_password: SecretStr | None = None
+    redis_timeout_seconds: float = 2.0
+    redis_cache_ttl_seconds: int = 300
 
     logfire_base_url: str = "https://logfire-us.pydantic.dev"
     logfire_read_token: SecretStr | None = None
@@ -62,6 +78,11 @@ class Settings(BaseSettings):
         "azure_openai_api_version",
         "azure_openai_deployment",
         "target_repo_url",
+        "redis_url",
+        "redis_username",
+        "postgres_host",
+        "postgres_user",
+        "postgres_db",
         mode="before",
     )
     @classmethod
@@ -73,6 +94,29 @@ class Settings(BaseSettings):
     @property
     def effective_openai_model(self) -> str:
         return self.openai_triage_model or self.triage_model
+
+    @property
+    def effective_database_url(self) -> str | URL:
+        if self.database_url:
+            return self.database_url
+        has_postgres_config = all(
+            [
+                self.postgres_host,
+                self.postgres_user,
+                self.postgres_password,
+                self.postgres_db,
+            ]
+        )
+        if has_postgres_config:
+            return URL.create(
+                "postgresql+asyncpg",
+                username=self.postgres_user,
+                password=self.postgres_password.get_secret_value(),
+                host=self.postgres_host,
+                port=self.postgres_port,
+                database=self.postgres_db,
+            )
+        return "sqlite+aiosqlite:///./data/auto_triage.db"
 
     @field_validator("github_repo")
     @classmethod

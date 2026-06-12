@@ -1,0 +1,101 @@
+name: auto-triage
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-auto_triage}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-auto_triage_password}
+      POSTGRES_DB: ${POSTGRES_DB:-auto_triage}
+    ports:
+      - "${POSTGRES_PUBLISHED_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    environment:
+      REDIS_USERNAME: ${REDIS_USERNAME:-auto_triage}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-auto_triage_redis_password}
+    entrypoint: ["/bin/sh", "/usr/local/bin/redis-auth-entrypoint"]
+    ports:
+      - "${REDIS_PUBLISHED_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+      - ./docker/redis/entrypoint.sh:/usr/local/bin/redis-auth-entrypoint:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "redis-cli --user \"$${REDIS_USERNAME}\" -a \"$${REDIS_PASSWORD}\" ping | grep PONG",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  auto_triage:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: docker
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-auto_triage}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-auto_triage_password}
+      POSTGRES_DB: ${POSTGRES_DB:-auto_triage}
+      RUN_WORKER: ${RUN_WORKER:-true}
+      REDIS_CACHE_ENABLED: ${REDIS_CACHE_ENABLED:-true}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_USERNAME: ${REDIS_USERNAME:-auto_triage}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-auto_triage_redis_password}
+      REDIS_CACHE_TTL_SECONDS: ${REDIS_CACHE_TTL_SECONDS:-300}
+      LOGFIRE_BASE_URL: ${LOGFIRE_BASE_URL:-https://logfire-us.pydantic.dev}
+      LOGFIRE_READ_TOKEN: ${LOGFIRE_READ_TOKEN:-}
+      LOGFIRE_PROJECT_URL: ${LOGFIRE_PROJECT_URL:-}
+      LOGFIRE_LOOKBACK_HOURS: ${LOGFIRE_LOOKBACK_HOURS:-2}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      TRIAGE_MODEL: ${TRIAGE_MODEL:-openai:gpt-4.1-mini}
+      OPENAI_TRIAGE_MODEL: ${OPENAI_TRIAGE_MODEL:-}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_REPO: ${GITHUB_REPO:-}
+      GITHUB_DEFAULT_BRANCH: ${GITHUB_DEFAULT_BRANCH:-main}
+      TARGET_REPO_URL: ${TARGET_REPO_URL:-}
+      WORKSPACE_DIR: ${WORKSPACE_DIR:-.auto-triage-work}
+      CLEANUP_REPO_AFTER_TRIAGE: ${CLEANUP_REPO_AFTER_TRIAGE:-true}
+    ports:
+      - "${AUTO_TRIAGE_PORT:-8001}:8001"
+    volumes:
+      - auto-triage-work:/tmp/auto-triage-work
+
+  test_app:
+    build:
+      context: ./test-app
+      dockerfile: Dockerfile
+    environment:
+      LOGFIRE_TOKEN: ${TEST_APP_LOGFIRE_TOKEN:-}
+      LOGFIRE_SERVICE_NAME: ${TEST_APP_LOGFIRE_SERVICE_NAME:-test-app-failure-generator}
+      LOGFIRE_ENVIRONMENT: ${TEST_APP_LOGFIRE_ENVIRONMENT:-docker}
+    ports:
+      - "${TEST_APP_PORT:-8000}:8000"
+
+volumes:
+  postgres-data:
+  redis-data:
+  auto-triage-work:

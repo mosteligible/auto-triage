@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from auto_triage.accounts import get_user_config_by_id, settings_for_repository_config
 from auto_triage.agent import TriageAgent
 from auto_triage.config import Settings
 from auto_triage.database import AsyncSessionLocal
@@ -120,20 +121,26 @@ class TriageWorker:
             job = result.scalar_one()
             incident_model = job.incident
             normalized = NormalizedIncident.model_validate(incident_model.normalized)
+            user_config = await get_user_config_by_id(session, normalized.user_config_id)
+            if normalized.user_config_id and user_config is None:
+                raise RuntimeError(
+                    f"user repository config disappeared: {normalized.user_config_id}"
+                )
+            effective_settings = settings_for_repository_config(self.settings, user_config)
 
-        logfire_evidence = await LogfireClient(self.settings).fetch_evidence(normalized)
+        logfire_evidence = await LogfireClient(effective_settings).fetch_evidence(normalized)
         logfire_records = [
             record
             for record in logfire_evidence.get("records", [])
             if isinstance(record, dict)
         ]
-        codebase_evidence = await CodebaseInspector(self.settings).inspect(
+        codebase_evidence = await CodebaseInspector(effective_settings).inspect(
             incident_model.id,
             normalized,
             logfire_records,
         )
 
-        agent_report = await TriageAgent(self.settings).run(
+        agent_report = await TriageAgent(effective_settings).run(
             normalized,
             logfire_evidence,
             codebase_evidence,
@@ -157,7 +164,7 @@ class TriageWorker:
             )
 
             existing_issue = await self._find_existing_issue(session, incident.fingerprint)
-            github = GitHubClient(self.settings)
+            github = GitHubClient(effective_settings)
             issue_url: str | None = None
             if existing_issue is None:
                 issue_response = await github.create_issue(
@@ -169,7 +176,7 @@ class TriageWorker:
                 session.add(
                     GitHubIssueLink(
                         incident_id=incident.id,
-                        repo=self.settings.github_repo or "",
+                        repo=effective_settings.github_repo or "",
                         issue_number=issue_response["number"],
                         issue_url=issue_response["html_url"],
                         state=issue_response.get("state", "open"),
@@ -214,9 +221,11 @@ class TriageWorker:
                 session.add(
                     GitHubPullRequestLink(
                         incident_id=incident.id,
-                        repo=self.settings.github_repo or "",
+                        repo=effective_settings.github_repo or "",
                         branch=pull_head.get("ref", ""),
-                        base_branch=pull_base.get("ref", self.settings.github_default_branch),
+                        base_branch=pull_base.get(
+                            "ref", effective_settings.github_default_branch
+                        ),
                         pull_number=pull_response["number"],
                         pull_url=pull_response["html_url"],
                         state=pull_response.get("state", "open"),

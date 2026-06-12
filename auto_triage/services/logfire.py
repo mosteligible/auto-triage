@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
 
+from auto_triage.cache import CacheClient
 from auto_triage.config import Settings
 from auto_triage.schemas import NormalizedIncident
 from auto_triage.security import secret_value
@@ -24,6 +27,13 @@ class LogfireClient:
                 "records": [],
             }
 
+        cache = CacheClient(self.settings)
+        cache_key = self._cache_key(incident)
+        cached = await cache.get_json(cache_key)
+        if cached is not None:
+            cached["cache"] = {"hit": True, "key": cache_key}
+            return cached
+
         min_timestamp = datetime.now(tz=UTC) - timedelta(hours=self.settings.logfire_lookback_hours)
         queries: list[dict[str, Any]] = []
         records: list[dict[str, Any]] = []
@@ -40,12 +50,19 @@ class LogfireClient:
             queries.append({"name": "similar", "sql": similar_sql, "row_count": len(similar_rows)})
             records.extend(similar_rows)
 
-        return {
+        payload = {
             "available": True,
             "queries": queries,
             "records": _dedupe_records(records)[: self.settings.logfire_query_limit],
             "lookback_hours": self.settings.logfire_lookback_hours,
         }
+        await cache.set_json(cache_key, payload, self.settings.redis_cache_ttl_seconds)
+        payload["cache"] = {
+            "hit": False,
+            "key": cache_key,
+            "ttl_seconds": self.settings.redis_cache_ttl_seconds,
+        }
+        return payload
 
     async def _query(
         self,
@@ -141,6 +158,16 @@ WHERE {where_clause}
 ORDER BY start_timestamp DESC
 LIMIT {self.settings.logfire_query_limit}
 """.strip()
+
+    def _cache_key(self, incident: NormalizedIncident) -> str:
+        basis = {
+            "fingerprint": incident.fingerprint,
+            "trace_id": incident.trace_id or "",
+            "lookback_hours": self.settings.logfire_lookback_hours,
+            "query_limit": self.settings.logfire_query_limit,
+        }
+        digest = hashlib.sha256(json.dumps(basis, sort_keys=True).encode("utf-8")).hexdigest()
+        return f"auto-triage:logfire-evidence:{digest}"
 
 
 def sql_literal(value: str) -> str:
