@@ -1,0 +1,14 @@
+.git
+.venv
+.ruff_cache
+.pytest_cache
+__pycache__/
+*.py[cod]
+*.sqlite
+*.db
+data/
+.env
+.envrc
+.auto-triage-work/
+test-app/.venv/
+test-app/__pycache__/
