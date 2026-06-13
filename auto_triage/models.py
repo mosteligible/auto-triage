@@ -3,16 +3,16 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 from typing import Any
-from uuid import uuid4
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from uuid6 import uuid7
 
 from auto_triage.database import Base
 
 
 def new_id() -> str:
-    return uuid4().hex
+    return uuid7().hex
 
 
 class IncidentStatus(StrEnum):
@@ -32,6 +32,44 @@ class JobStatus(StrEnum):
     FAILED = "failed"
 
 
+class Organization(Base):
+    __tablename__ = "organizations"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(256))
+    slug: Mapped[str] = mapped_column(String(256), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    memberships: Mapped[list[OrganizationMembership]] = relationship(
+        back_populates="organization", cascade="all, delete-orphan"
+    )
+    repository_configs: Mapped[list[UserRepositoryConfig]] = relationship(
+        back_populates="organization", cascade="all, delete-orphan"
+    )
+
+
+class OrganizationMembership(Base):
+    __tablename__ = "organization_memberships"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "user_id", name="uq_org_membership_org_user"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("triage_users.id"), index=True)
+    role: Mapped[str] = mapped_column(String(64), default="owner", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    organization: Mapped[Organization] = relationship(back_populates="memberships")
+    user: Mapped[TriageUser] = relationship(back_populates="organization_memberships")
+
+
 class TriageUser(Base):
     __tablename__ = "triage_users"
 
@@ -48,6 +86,9 @@ class TriageUser(Base):
     repository_config: Mapped[UserRepositoryConfig | None] = relationship(
         back_populates="user", cascade="all, delete-orphan", uselist=False
     )
+    organization_memberships: Mapped[list[OrganizationMembership]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class UserRepositoryConfig(Base):
@@ -55,6 +96,7 @@ class UserRepositoryConfig(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     user_id: Mapped[str] = mapped_column(ForeignKey("triage_users.id"), unique=True, index=True)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
     webhook_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, default=new_id)
     github_owner: Mapped[str] = mapped_column(String(128))
     github_repo_name: Mapped[str] = mapped_column(String(128))
@@ -77,12 +119,20 @@ class UserRepositoryConfig(Base):
     )
 
     user: Mapped[TriageUser] = relationship(back_populates="repository_config")
+    organization: Mapped[Organization] = relationship(back_populates="repository_configs")
 
 
 class Incident(Base):
     __tablename__ = "incidents"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    organization_id: Mapped[str | None] = mapped_column(
+        ForeignKey("organizations.id"), nullable=True, index=True
+    )
+    user_config_id: Mapped[str | None] = mapped_column(
+        ForeignKey("user_repository_configs.id"), nullable=True, index=True
+    )
+    webhook_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     source: Mapped[str] = mapped_column(String(64), default="logfire", index=True)
     alert_kind: Mapped[str] = mapped_column(String(64), index=True)
     title: Mapped[str] = mapped_column(String(512))

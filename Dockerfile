@@ -12,6 +12,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml uv.lock README.md LICENSE ./
+COPY alembic.ini ./
+COPY migrations ./migrations
 COPY auto_triage ./auto_triage
 
 RUN uv sync --frozen --no-dev

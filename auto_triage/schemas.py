@@ -35,6 +35,7 @@ class NormalizedIncident(BaseModel):
     source: str = "logfire"
     ai_provider: AIProvider = "openai"
     user_id: str | None = None
+    organization_id: str | None = None
     user_config_id: str | None = None
     webhook_id: str | None = None
     alert_kind: str
@@ -83,6 +84,7 @@ class AuthLoginIn(BaseModel):
 
 class AuthLoginOut(BaseModel):
     user_id: str
+    organization_id: str
     email: str
     display_name: str | None
     auth_token: str
@@ -106,6 +108,7 @@ class UserRepositoryConfigIn(BaseModel):
 
 class UserRepositoryConfigOut(BaseModel):
     id: str
+    organization_id: str
     webhook_id: str
     webhook_path: str
     github_owner: str
@@ -128,6 +131,7 @@ class UserRepositoryConfigOut(BaseModel):
 
 class UserProfileOut(BaseModel):
     user_id: str
+    organization_id: str | None
     email: str
     display_name: str | None
     repository_config: UserRepositoryConfigOut | None

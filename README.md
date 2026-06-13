@@ -29,10 +29,11 @@ cp .env.example .env
 Fill in `.env`, then run:
 
 ```bash
-uv run uvicorn auto_triage.app:app --reload
+uv run alembic upgrade head
+uv run uvicorn auto_triage.app:app --reload --host 0.0.0.0 --port 8001
 ```
 
-The server listens on `http://127.0.0.1:8000` by default.
+The server listens on `http://127.0.0.1:8001` with the command above.
 
 For the full local stack with Postgres, Redis, auto-triage, and the test app:
 
@@ -64,8 +65,7 @@ per-user webhook path, and sending a setup test alert through the FastAPI servic
 
 - `LOGFIRE_BASE_URL`: `https://logfire-us.pydantic.dev` or `https://logfire-eu.pydantic.dev`.
 - `DATABASE_URL`: optional SQLAlchemy async URL override. If omitted, the app builds a
-  Postgres URL from the `POSTGRES_*` settings, falling back to local SQLite only when Postgres
-  settings are absent.
+  Postgres URL from the `POSTGRES_*` settings.
 - `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`:
   Postgres host, port, username, password, and database.
 - `REDIS_CACHE_ENABLED`: enables Redis caching for Logfire evidence lookups.
@@ -199,8 +199,9 @@ Slack-shaped payloads and direct record-shaped payloads.
 
 ## Runtime State
 
-- SQLite DB: `data/auto_triage.db`
+- Postgres stores organizations, users, repository setup, incidents, jobs, evidence, and
+  GitHub output links.
 - Temporary clones: `/tmp/auto-triage-work/...` for relative `WORKSPACE_DIR` values. This keeps
   Uvicorn `--reload` from restarting when the worker clones the target repo.
 
-Both are ignored by git.
+Temporary clone directories are ignored by git.

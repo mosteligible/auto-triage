@@ -1,5 +1,4 @@
 from collections.abc import AsyncGenerator
-from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
@@ -16,25 +15,8 @@ engine = create_async_engine(settings.effective_database_url, future=True)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
-def _sqlite_file_path(database_url: str) -> Path | None:
-    prefix = "sqlite+aiosqlite:///"
-    if not database_url.startswith(prefix):
-        return None
-    raw_path = database_url.removeprefix(prefix)
-    if raw_path == ":memory:":
-        return None
-    return Path(raw_path)
-
-
 async def init_db() -> None:
-    sqlite_path = _sqlite_file_path(str(settings.effective_database_url))
-    if sqlite_path is not None:
-        sqlite_path.parent.mkdir(parents=True, exist_ok=True)
-
-    from auto_triage import models  # noqa: F401
-
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
+    return None
 
 
 async def close_db() -> None:

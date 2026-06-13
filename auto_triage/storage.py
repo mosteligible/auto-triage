@@ -21,6 +21,9 @@ async def enqueue_incident(
 
     if incident is None:
         incident = Incident(
+            organization_id=normalized.organization_id,
+            user_config_id=normalized.user_config_id,
+            webhook_id=normalized.webhook_id,
             source=normalized.source,
             alert_kind=normalized.alert_kind,
             title=normalized.title,
@@ -38,6 +41,9 @@ async def enqueue_incident(
         await session.flush()
     else:
         incident.occurrence_count += 1
+        incident.organization_id = normalized.organization_id
+        incident.user_config_id = normalized.user_config_id
+        incident.webhook_id = normalized.webhook_id
         incident.fingerprint = normalized.fingerprint
         incident.title = normalized.title
         incident.alert_kind = normalized.alert_kind
@@ -106,14 +112,24 @@ def _status_family(status_code: int | None) -> str:
 
 
 def _normalized_user_key(normalized: NormalizedIncident) -> str:
-    return normalized.webhook_id or normalized.user_config_id or normalized.user_id or ""
+    return (
+        normalized.webhook_id
+        or normalized.user_config_id
+        or normalized.organization_id
+        or normalized.user_id
+        or ""
+    )
 
 
 def _incident_user_key(incident: Incident) -> str:
     normalized = incident.normalized if isinstance(incident.normalized, dict) else {}
     return (
-        str(normalized.get("webhook_id") or "")
+        incident.webhook_id
+        or incident.user_config_id
+        or incident.organization_id
+        or str(normalized.get("webhook_id") or "")
         or str(normalized.get("user_config_id") or "")
+        or str(normalized.get("organization_id") or "")
         or str(normalized.get("user_id") or "")
     )
 

@@ -1,4 +1,4 @@
-.PHONY: help server auto-triage start-server test-app run-test-app triage-ui compose-up compose-down compose-logs
+.PHONY: help server auto-triage start-server migrate migration-current test-app run-test-app triage-ui compose-up compose-down compose-logs
 
 AUTO_TRIAGE_HOST ?= 0.0.0.0
 AUTO_TRIAGE_PORT ?= 8001
@@ -8,6 +8,7 @@ PYTHON ?= python
 
 help:
 	@printf "Targets:\n"
+	@printf "  make migrate       Run Alembic migrations against Postgres\n"
 	@printf "  make server        Start the auto-triage FastAPI server\n"
 	@printf "  make test-app      Start the Logfire test app\n"
 	@printf "  make triage-ui     Start the Next.js setup UI\n"
@@ -23,6 +24,12 @@ help:
 server: auto-triage
 
 start-server: auto-triage
+
+migrate:
+	alembic upgrade head
+
+migration-current:
+	alembic current
 
 auto-triage:
 	$(PYTHON) -m uvicorn auto_triage.app:app --reload --host $(AUTO_TRIAGE_HOST) --port $(AUTO_TRIAGE_PORT)

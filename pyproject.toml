@@ -7,7 +7,7 @@ requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "Amit Sharma" }]
 dependencies = [
-    "aiosqlite>=0.20.0",
+    "alembic>=1.18.4",
     "asyncpg>=0.31.0",
     "fastapi>=0.116.0",
     "httpx>=0.28.1",
@@ -16,6 +16,7 @@ dependencies = [
     "pydantic-settings>=2.10.0",
     "redis>=5.0.0",
     "sqlalchemy[asyncio]>=2.0.41",
+    "uuid6>=2025.0.1",
     "uvicorn[standard]>=0.35.0",
 ]
 

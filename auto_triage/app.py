@@ -104,6 +104,9 @@ async def login(
 async def me(user: CurrentUserDep) -> UserProfileOut:
     return UserProfileOut(
         user_id=user.id,
+        organization_id=user.organization_memberships[0].organization_id
+        if user.organization_memberships
+        else None,
         email=user.email,
         display_name=user.display_name,
         repository_config=repository_config_response(user.repository_config),
@@ -224,11 +227,13 @@ def _attach_user_config(
     config: UserRepositoryConfig,
 ) -> None:
     normalized.user_id = config.user_id
+    normalized.organization_id = config.organization_id
     normalized.user_config_id = config.id
     normalized.webhook_id = config.webhook_id
     normalized.attributes = {
         **normalized.attributes,
         "auto_triage": {
+            "organization_id": config.organization_id,
             "user_id": config.user_id,
             "user_config_id": config.id,
             "webhook_id": config.webhook_id,

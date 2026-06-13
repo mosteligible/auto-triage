@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, status
@@ -10,7 +11,12 @@ from sqlalchemy.orm import selectinload
 
 from auto_triage.config import Settings
 from auto_triage.database import get_session
-from auto_triage.models import TriageUser, UserRepositoryConfig
+from auto_triage.models import (
+    Organization,
+    OrganizationMembership,
+    TriageUser,
+    UserRepositoryConfig,
+)
 from auto_triage.schemas import (
     AuthLoginIn,
     AuthLoginOut,
@@ -39,9 +45,11 @@ async def login_or_register_user(
             auth_token_hash=token_hash(token),
         )
         session.add(user)
+        await session.flush()
+        organization = await _ensure_default_organization(session, user)
         await session.commit()
         await session.refresh(user)
-        return _auth_response(user, token)
+        return _auth_response(user, token, organization.id)
 
     if not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid login")
@@ -50,9 +58,10 @@ async def login_or_register_user(
     user.auth_token_hash = token_hash(token)
     if payload.display_name:
         user.display_name = payload.display_name
+    organization = await _ensure_default_organization(session, user)
     await session.commit()
     await session.refresh(user)
-    return _auth_response(user, token)
+    return _auth_response(user, token, organization.id)
 
 
 async def current_user(
@@ -65,7 +74,10 @@ async def current_user(
     result = await session.execute(
         select(TriageUser)
         .where(TriageUser.auth_token_hash == token_hash(token))
-        .options(selectinload(TriageUser.repository_config))
+        .options(
+            selectinload(TriageUser.repository_config),
+            selectinload(TriageUser.organization_memberships),
+        )
     )
     user = result.scalar_one_or_none()
     if user is None:
@@ -100,10 +112,13 @@ async def upsert_repository_config(
     user: TriageUser,
     payload: UserRepositoryConfigIn,
 ) -> UserRepositoryConfigOut:
+    organization_id = await _primary_organization_id(session, user)
     config = user.repository_config
     if config is None:
-        config = UserRepositoryConfig(user_id=user.id)
+        config = UserRepositoryConfig(user_id=user.id, organization_id=organization_id)
         session.add(config)
+    else:
+        config.organization_id = organization_id
 
     config.github_owner = payload.github_owner
     config.github_repo_name = payload.github_repo_name
@@ -132,6 +147,7 @@ def repository_config_response(
     repo = f"{config.github_owner}/{config.github_repo_name}"
     return UserRepositoryConfigOut(
         id=config.id,
+        organization_id=config.organization_id,
         webhook_id=config.webhook_id,
         webhook_path=f"/webhooks/users/{config.webhook_id}/logfire",
         github_owner=config.github_owner,
@@ -176,10 +192,69 @@ def settings_for_repository_config(
     )
 
 
-def _auth_response(user: TriageUser, token: str) -> AuthLoginOut:
+def _auth_response(user: TriageUser, token: str, organization_id: str) -> AuthLoginOut:
     return AuthLoginOut(
         user_id=user.id,
+        organization_id=organization_id,
         email=user.email,
         display_name=user.display_name,
         auth_token=token,
     )
+
+
+async def _ensure_default_organization(
+    session: AsyncSession,
+    user: TriageUser,
+) -> Organization:
+    result = await session.execute(
+        select(Organization)
+        .join(OrganizationMembership)
+        .where(OrganizationMembership.user_id == user.id)
+        .order_by(Organization.created_at)
+        .limit(1)
+    )
+    organization = result.scalar_one_or_none()
+    if organization is not None:
+        return organization
+
+    organization = Organization(
+        name=_default_organization_name(user),
+        slug=_default_organization_slug(user),
+    )
+    session.add(organization)
+    await session.flush()
+    session.add(
+        OrganizationMembership(
+            organization_id=organization.id,
+            user_id=user.id,
+            role="owner",
+        )
+    )
+    return organization
+
+
+async def _primary_organization_id(session: AsyncSession, user: TriageUser) -> str:
+    organization_id = _primary_organization_id_from_user(user)
+    if organization_id:
+        return organization_id
+    organization = await _ensure_default_organization(session, user)
+    return organization.id
+
+
+def _primary_organization_id_from_user(user: TriageUser) -> str | None:
+    memberships = getattr(user, "organization_memberships", None) or []
+    if memberships:
+        return memberships[0].organization_id
+    return None
+
+
+def _default_organization_name(user: TriageUser) -> str:
+    if user.display_name:
+        return f"{user.display_name} Organization"
+    return f"{user.email} Organization"
+
+
+def _default_organization_slug(user: TriageUser) -> str:
+    prefix = user.email.split("@", 1)[0] or "org"
+    slug = re.sub(r"[^a-z0-9]+", "-", prefix.lower()).strip("-") or "org"
+    return f"{slug}-{user.id[:8]}"

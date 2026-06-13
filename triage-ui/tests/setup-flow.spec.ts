@@ -1,5 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { rmSync } from "node:fs";
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { resolve } from "node:path";
 
 import { expect, test } from "@playwright/test";
@@ -7,23 +6,35 @@ import { expect, test } from "@playwright/test";
 const repoRoot = resolve(__dirname, "../..");
 const apiPort = 8011;
 const apiBaseUrl = `http://127.0.0.1:${apiPort}`;
-const databasePath = `/tmp/auto-triage-ui-e2e-${process.pid}.db`;
+const apiEnv = {
+  ...process.env,
+  DATABASE_URL: process.env.DATABASE_URL ?? "",
+  POSTGRES_HOST: process.env.POSTGRES_HOST ?? "127.0.0.1",
+  POSTGRES_PORT: process.env.POSTGRES_PORT ?? "5432",
+  POSTGRES_USER: process.env.POSTGRES_USER ?? "auto_triage",
+  POSTGRES_PASSWORD: process.env.POSTGRES_PASSWORD ?? "auto_triage_password",
+  POSTGRES_DB: process.env.POSTGRES_DB ?? "auto_triage",
+  RUN_WORKER: "false",
+  UV_CACHE_DIR: "/tmp/uv-cache",
+};
 
 let apiProcess: ChildProcessWithoutNullStreams;
 
 test.beforeAll(async () => {
-  rmSync(databasePath, { force: true });
+  const migration = spawnSync("uv", ["run", "alembic", "upgrade", "head"], {
+    cwd: repoRoot,
+    env: apiEnv,
+    encoding: "utf8",
+  });
+  if (migration.status !== 0) {
+    throw new Error(`Migration failed:\n${migration.stdout}\n${migration.stderr}`);
+  }
   apiProcess = spawn(
     "uv",
     ["run", "uvicorn", "auto_triage.app:app", "--host", "127.0.0.1", "--port", String(apiPort)],
     {
       cwd: repoRoot,
-      env: {
-        ...process.env,
-        DATABASE_URL: `sqlite+aiosqlite:///${databasePath}`,
-        RUN_WORKER: "false",
-        UV_CACHE_DIR: "/tmp/uv-cache",
-      },
+      env: apiEnv,
     },
   );
 
@@ -36,7 +47,6 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   apiProcess?.kill("SIGTERM");
-  rmSync(databasePath, { force: true });
 });
 
 test("user can login, save repository setup, receive a unique webhook, and trigger an alert", async ({

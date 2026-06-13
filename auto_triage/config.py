@@ -99,24 +99,30 @@ class Settings(BaseSettings):
     def effective_database_url(self) -> str | URL:
         if self.database_url:
             return self.database_url
-        has_postgres_config = all(
-            [
-                self.postgres_host,
-                self.postgres_user,
-                self.postgres_password,
-                self.postgres_db,
-            ]
-        )
-        if has_postgres_config:
-            return URL.create(
-                "postgresql+asyncpg",
-                username=self.postgres_user,
-                password=self.postgres_password.get_secret_value(),
-                host=self.postgres_host,
-                port=self.postgres_port,
-                database=self.postgres_db,
+        missing = [
+            name
+            for name, value in {
+                "POSTGRES_HOST": self.postgres_host,
+                "POSTGRES_USER": self.postgres_user,
+                "POSTGRES_PASSWORD": self.postgres_password,
+                "POSTGRES_DB": self.postgres_db,
+            }.items()
+            if value is None
+        ]
+        if missing:
+            joined = ", ".join(missing)
+            raise ValueError(
+                "Postgres configuration is required. Set DATABASE_URL or provide "
+                f"all POSTGRES_* settings. Missing: {joined}"
             )
-        return "sqlite+aiosqlite:///./data/auto_triage.db"
+        return URL.create(
+            "postgresql+asyncpg",
+            username=self.postgres_user,
+            password=self.postgres_password.get_secret_value(),
+            host=self.postgres_host,
+            port=self.postgres_port,
+            database=self.postgres_db,
+        )
 
     @field_validator("github_repo")
     @classmethod
