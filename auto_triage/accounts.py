@@ -15,6 +15,7 @@ from auto_triage.models import (
     Organization,
     OrganizationMembership,
     TriageUser,
+    UserEnvironmentSettings,
     UserRepositoryConfig,
 )
 from auto_triage.schemas import (
@@ -82,6 +83,18 @@ async def current_user(
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid bearer token")
+    if not user.organization_memberships:
+        await _ensure_default_organization(session, user)
+        await session.commit()
+        result = await session.execute(
+            select(TriageUser)
+            .where(TriageUser.id == user.id)
+            .options(
+                selectinload(TriageUser.repository_config),
+                selectinload(TriageUser.organization_memberships),
+            )
+        )
+        user = result.scalar_one()
     return user
 
 
@@ -105,6 +118,20 @@ async def get_user_config_by_id(
     if not config_id:
         return None
     return await session.get(UserRepositoryConfig, config_id)
+
+
+async def get_environment_settings_for_config(
+    session: AsyncSession,
+    config: UserRepositoryConfig | None,
+) -> UserEnvironmentSettings | None:
+    if config is None:
+        return None
+    result = await session.execute(
+        select(UserEnvironmentSettings)
+        .where(UserEnvironmentSettings.user_id == config.user_id)
+        .where(UserEnvironmentSettings.organization_id == config.organization_id)
+    )
+    return result.scalar_one_or_none()
 
 
 async def upsert_repository_config(
@@ -172,24 +199,52 @@ def repository_config_response(
 def settings_for_repository_config(
     base_settings: Settings,
     config: UserRepositoryConfig | None,
+    environment_settings: UserEnvironmentSettings | None = None,
 ) -> Settings:
     if config is None:
         return base_settings
 
-    return base_settings.model_copy(
-        update={
-            "github_repo": f"{config.github_owner}/{config.github_repo_name}",
-            "github_token": SecretStr(config.github_token),
-            "github_default_branch": config.github_default_branch,
-            "target_repo_url": config.target_repo_url
-            or f"https://github.com/{config.github_owner}/{config.github_repo_name}.git",
-            "logfire_base_url": config.logfire_base_url,
-            "logfire_read_token": SecretStr(config.logfire_read_token)
-            if config.logfire_read_token
-            else base_settings.logfire_read_token,
-            "logfire_project_url": config.logfire_project_url,
-        }
-    )
+    updates = {
+        "github_repo": f"{config.github_owner}/{config.github_repo_name}",
+        "github_token": SecretStr(config.github_token),
+        "github_default_branch": config.github_default_branch,
+        "target_repo_url": config.target_repo_url
+        or f"https://github.com/{config.github_owner}/{config.github_repo_name}.git",
+        "logfire_base_url": config.logfire_base_url,
+        "logfire_read_token": SecretStr(config.logfire_read_token)
+        if config.logfire_read_token
+        else base_settings.logfire_read_token,
+        "logfire_project_url": config.logfire_project_url,
+    }
+    if environment_settings is not None:
+        updates.update(
+            {
+                "triage_model": environment_settings.openai_model,
+                "openai_api_key": SecretStr(environment_settings.openai_api_key)
+                if environment_settings.openai_api_key
+                else base_settings.openai_api_key,
+                "azure_openai_endpoint": environment_settings.azure_openai_endpoint
+                or base_settings.azure_openai_endpoint,
+                "azure_openai_api_key": SecretStr(environment_settings.azure_openai_api_key)
+                if environment_settings.azure_openai_api_key
+                else base_settings.azure_openai_api_key,
+                "azure_openai_api_version": environment_settings.azure_openai_api_version
+                or base_settings.azure_openai_api_version,
+                "azure_openai_deployment": environment_settings.azure_openai_deployment
+                or base_settings.azure_openai_deployment,
+                "redis_cache_enabled": environment_settings.redis_enabled,
+                "redis_host": environment_settings.redis_host or base_settings.redis_host,
+                "redis_port": environment_settings.redis_port,
+                "redis_username": environment_settings.redis_username
+                or base_settings.redis_username,
+                "redis_password": SecretStr(environment_settings.redis_password)
+                if environment_settings.redis_password
+                else base_settings.redis_password,
+                "redis_cache_ttl_seconds": environment_settings.redis_ttl_seconds,
+            }
+        )
+
+    return base_settings.model_copy(update=updates)
 
 
 def _auth_response(user: TriageUser, token: str, organization_id: str) -> AuthLoginOut:

@@ -59,7 +59,12 @@ npm run dev
 ```
 
 It supports operator login, saving a user's repository/Logfire setup, receiving a generated
-per-user webhook path, and sending a setup test alert through the FastAPI service.
+per-user webhook path, and sending a setup test alert through the FastAPI service. The UI also
+exposes a Next.js tRPC route at `/api/trpc` that reads and writes setup environment settings
+directly in Postgres, scoped by the signed-in user's bearer token and organization membership.
+
+When running the UI separately, give it the same `DATABASE_URL` or `POSTGRES_*` settings used by
+the FastAPI service so the tRPC route can reach the auto-triage database.
 
 ## Required Configuration
 

@@ -9,6 +9,7 @@ export type SetupConfig = {
   userDisplayName: string;
   authToken: string;
   userId: string;
+  organizationId: string;
   webhookPath: string;
   webhookId: string;
   publicWebhookBaseUrl: string;
@@ -51,6 +52,7 @@ export const defaultSetupConfig: SetupConfig = {
   userDisplayName: "Operator",
   authToken: "",
   userId: "",
+  organizationId: "",
   webhookPath: "",
   webhookId: "",
   publicWebhookBaseUrl: "",
@@ -95,6 +97,10 @@ export function autoTriageWebhookUrl(config: SetupConfig): string {
 
 export function logfireBaseUrl(region: SetupConfig["logfireRegion"]): string {
   return region === "eu" ? "https://logfire-eu.pydantic.dev" : "https://logfire-us.pydantic.dev";
+}
+
+export function logfireRegionFromBaseUrl(value: string | null | undefined): SetupConfig["logfireRegion"] {
+  return value?.includes("logfire-eu") ? "eu" : "us";
 }
 
 export function buildEnv(config: SetupConfig): string {

@@ -27,8 +27,15 @@ import {
   buildSmokeTest,
   defaultSetupConfig,
   logfireBaseUrl,
+  logfireRegionFromBaseUrl,
   setupProgress,
 } from "@/lib/setup";
+import {
+  fetchPersistedSetup,
+  saveEnvironmentSettings,
+  type PersistedEnvironmentSettings,
+  type PersistedSetup,
+} from "@/lib/setup-persistence";
 
 const storageKey = "auto-triage.setup.v1";
 
@@ -46,8 +53,10 @@ export function SetupWorkspace() {
   const [loginState, setLoginState] = useState<ActionState>({ kind: "idle", label: "Signed out" });
   const [saveState, setSaveState] = useState<ActionState>({ kind: "idle", label: "Not saved" });
   const [alertState, setAlertState] = useState<ActionState>({ kind: "idle", label: "Not sent" });
+  const [syncState, setSyncState] = useState<ActionState>({ kind: "idle", label: "Not loaded" });
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const didLoadDraft = useRef(false);
+  const lastLoadedToken = useRef<string | null>(null);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(storageKey);
@@ -127,6 +136,7 @@ export function SetupWorkspace() {
         ...current,
         authToken: payload.auth_token,
         userId: payload.user_id,
+        organizationId: payload.organization_id,
         userEmail: payload.email,
         userDisplayName: payload.display_name ?? current.userDisplayName,
       }));
@@ -138,6 +148,28 @@ export function SetupWorkspace() {
       });
     }
   }
+
+  async function loadPersistedSetup(authToken: string) {
+    setSyncState({ kind: "working", label: "Loading" });
+    try {
+      const persisted = await fetchPersistedSetup(authToken);
+      setConfig((current) => mergePersistedSetup(current, persisted));
+      setSyncState({ kind: "ok", label: "Loaded" });
+    } catch (error) {
+      setSyncState({
+        kind: "error",
+        label: error instanceof Error ? error.message : "Load failed",
+      });
+    }
+  }
+
+  useEffect(() => {
+    if (!didLoadDraft.current || !config.authToken || lastLoadedToken.current === config.authToken) {
+      return;
+    }
+    lastLoadedToken.current = config.authToken;
+    void loadPersistedSetup(config.authToken);
+  }, [config.authToken]);
 
   async function saveSetup() {
     setSaveState({ kind: "working", label: "Saving" });
@@ -182,17 +214,21 @@ export function SetupWorkspace() {
         setSaveState({ kind: "error", label: payload.detail ?? "Save failed" });
         return;
       }
-      setConfig((current) => ({
-        ...current,
+
+      const nextConfig: SetupConfig = {
+        ...config,
+        organizationId: payload.organization_id ?? config.organizationId,
         webhookId: payload.webhook_id,
         webhookPath: payload.webhook_path,
         githubRepo: payload.github_repo,
         githubDefaultBranch: payload.github_default_branch,
-        targetRepoUrl: payload.target_repo_url ?? current.targetRepoUrl,
-        logfireServiceName: payload.logfire_service_name ?? current.logfireServiceName,
-        logfireRoute: payload.logfire_route ?? current.logfireRoute,
+        targetRepoUrl: payload.target_repo_url ?? config.targetRepoUrl,
+        logfireServiceName: payload.logfire_service_name ?? config.logfireServiceName,
+        logfireRoute: payload.logfire_route ?? config.logfireRoute,
         aiProvider: payload.ai_provider,
-      }));
+      };
+      const environmentSettings = await saveEnvironmentSettings(config.authToken, nextConfig);
+      setConfig(applyEnvironmentSettings(nextConfig, environmentSettings));
       setSaveState({ kind: "ok", label: `Saved ${payload.github_repo}` });
     } catch (error) {
       setSaveState({
@@ -246,8 +282,10 @@ export function SetupWorkspace() {
 
   function resetDraft() {
     window.localStorage.removeItem(storageKey);
+    lastLoadedToken.current = null;
     setConfig(defaultSetupConfig);
     setHealth({ kind: "idle", label: "Not checked" });
+    setSyncState({ kind: "idle", label: "Not loaded" });
   }
 
   return (
@@ -607,6 +645,7 @@ export function SetupWorkspace() {
             <div className="statusGrid">
               <StatusLine state={saveState} label="Setup" />
               <StatusLine state={alertState} label="Alert" />
+              <StatusLine state={syncState} label="Database" />
             </div>
           </form>
 
@@ -643,6 +682,88 @@ export function SetupWorkspace() {
       </section>
     </main>
   );
+}
+
+function mergePersistedSetup(current: SetupConfig, persisted: PersistedSetup): SetupConfig {
+  let next: SetupConfig = {
+    ...current,
+    userId: persisted.user.userId,
+    organizationId: persisted.user.organizationId,
+    userEmail: persisted.user.email,
+    userDisplayName: persisted.user.displayName ?? current.userDisplayName,
+  };
+
+  if (persisted.repositoryConfig) {
+    const repository = persisted.repositoryConfig;
+    next = {
+      ...next,
+      organizationId: repository.organizationId,
+      webhookId: repository.webhookId,
+      webhookPath: repository.webhookPath,
+      githubRepo: repository.githubRepo,
+      githubDefaultBranch: repository.githubDefaultBranch,
+      targetRepoUrl: repository.targetRepoUrl ?? "",
+      githubToken: repository.githubToken,
+      logfireRegion: logfireRegionFromBaseUrl(repository.logfireBaseUrl),
+      logfireReadToken: repository.logfireReadToken ?? "",
+      logfireProjectUrl: repository.logfireProjectUrl ?? "",
+      logfireServiceName: repository.logfireServiceName ?? "",
+      logfireRoute: repository.logfireRoute ?? "",
+      alertTrigger: asAlertTrigger(repository.alertTrigger, next.alertTrigger),
+      alertMode: asAlertMode(repository.alertMode, next.alertMode),
+      aiProvider: repository.aiProvider,
+    };
+  }
+
+  return applyEnvironmentSettings(next, persisted.environmentSettings);
+}
+
+function applyEnvironmentSettings(
+  current: SetupConfig,
+  settings: PersistedEnvironmentSettings | null,
+): SetupConfig {
+  if (!settings) {
+    return current;
+  }
+  return {
+    ...current,
+    organizationId: settings.organizationId,
+    apiBaseUrl: settings.apiBaseUrl,
+    publicWebhookBaseUrl: settings.publicWebhookBaseUrl ?? "",
+    logfireRegion: settings.logfireRegion,
+    alertWindowMinutes: String(settings.alertWindowMinutes),
+    openaiModel: settings.openaiModel,
+    openaiApiKey: settings.openaiApiKey ?? "",
+    azureEndpoint: settings.azureEndpoint ?? "",
+    azureDeployment: settings.azureDeployment ?? "",
+    azureApiVersion: settings.azureApiVersion ?? "",
+    azureApiKey: settings.azureApiKey ?? "",
+    postgresHost: settings.postgresHost ?? "",
+    postgresPort: String(settings.postgresPort),
+    postgresUser: settings.postgresUser ?? "",
+    postgresPassword: settings.postgresPassword ?? "",
+    postgresDb: settings.postgresDb ?? "",
+    redisEnabled: settings.redisEnabled,
+    redisHost: settings.redisHost ?? "",
+    redisPort: String(settings.redisPort),
+    redisUsername: settings.redisUsername ?? "",
+    redisPassword: settings.redisPassword ?? "",
+    redisTtlSeconds: String(settings.redisTtlSeconds),
+  };
+}
+
+function asAlertTrigger(value: string, fallback: AlertTrigger): AlertTrigger {
+  if (value === "exception" || value === "http_5xx" || value === "error_rate") {
+    return value;
+  }
+  return fallback;
+}
+
+function asAlertMode(value: string, fallback: AlertMode): AlertMode {
+  if (value === "has_results" || value === "starts_having_results" || value === "results_change") {
+    return value;
+  }
+  return fallback;
 }
 
 function StepLink({

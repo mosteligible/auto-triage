@@ -8,7 +8,11 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from auto_triage.accounts import get_user_config_by_id, settings_for_repository_config
+from auto_triage.accounts import (
+    get_environment_settings_for_config,
+    get_user_config_by_id,
+    settings_for_repository_config,
+)
 from auto_triage.agent import TriageAgent
 from auto_triage.config import Settings
 from auto_triage.database import AsyncSessionLocal
@@ -126,7 +130,12 @@ class TriageWorker:
                 raise RuntimeError(
                     f"user repository config disappeared: {normalized.user_config_id}"
                 )
-            effective_settings = settings_for_repository_config(self.settings, user_config)
+            environment_settings = await get_environment_settings_for_config(session, user_config)
+            effective_settings = settings_for_repository_config(
+                self.settings,
+                user_config,
+                environment_settings,
+            )
 
         logfire_evidence = await LogfireClient(effective_settings).fetch_evidence(normalized)
         logfire_records = [

@@ -4,7 +4,17 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from uuid6 import uuid7
 
@@ -49,6 +59,9 @@ class Organization(Base):
     repository_configs: Mapped[list[UserRepositoryConfig]] = relationship(
         back_populates="organization", cascade="all, delete-orphan"
     )
+    environment_settings: Mapped[list[UserEnvironmentSettings]] = relationship(
+        back_populates="organization", cascade="all, delete-orphan"
+    )
 
 
 class OrganizationMembership(Base):
@@ -59,7 +72,7 @@ class OrganizationMembership(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
-    user_id: Mapped[str] = mapped_column(ForeignKey("triage_users.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("triage_users.id"), unique=True, index=True)
     role: Mapped[str] = mapped_column(String(64), default="owner", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -89,13 +102,16 @@ class TriageUser(Base):
     organization_memberships: Mapped[list[OrganizationMembership]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    environment_settings: Mapped[UserEnvironmentSettings | None] = relationship(
+        back_populates="user", cascade="all, delete-orphan", uselist=False
+    )
 
 
 class UserRepositoryConfig(Base):
     __tablename__ = "user_repository_configs"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
-    user_id: Mapped[str] = mapped_column(ForeignKey("triage_users.id"), unique=True, index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("triage_users.id"), index=True)
     organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
     webhook_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, default=new_id)
     github_owner: Mapped[str] = mapped_column(String(128))
@@ -120,6 +136,45 @@ class UserRepositoryConfig(Base):
 
     user: Mapped[TriageUser] = relationship(back_populates="repository_config")
     organization: Mapped[Organization] = relationship(back_populates="repository_configs")
+
+
+class UserEnvironmentSettings(Base):
+    __tablename__ = "user_environment_settings"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "user_id", name="uq_user_env_settings_org_user"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("triage_users.id"), index=True)
+    api_base_url: Mapped[str] = mapped_column(String(1024), default="http://127.0.0.1:8001")
+    public_webhook_base_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    logfire_region: Mapped[str] = mapped_column(String(16), default="us")
+    alert_window_minutes: Mapped[int] = mapped_column(Integer, default=10)
+    openai_model: Mapped[str] = mapped_column(String(256), default="openai:gpt-4.1-mini")
+    openai_api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    azure_openai_endpoint: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    azure_openai_deployment: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    azure_openai_api_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    azure_openai_api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    postgres_host: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    postgres_port: Mapped[int] = mapped_column(Integer, default=5432)
+    postgres_user: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    postgres_password: Mapped[str | None] = mapped_column(Text, nullable=True)
+    postgres_db: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    redis_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    redis_host: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    redis_port: Mapped[int] = mapped_column(Integer, default=6379)
+    redis_username: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    redis_password: Mapped[str | None] = mapped_column(Text, nullable=True)
+    redis_ttl_seconds: Mapped[int] = mapped_column(Integer, default=300)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    organization: Mapped[Organization] = relationship(back_populates="environment_settings")
+    user: Mapped[TriageUser] = relationship(back_populates="environment_settings")
 
 
 class Incident(Base):

@@ -102,11 +102,10 @@ async def login(
 
 @app.get("/users/me", response_model=UserProfileOut)
 async def me(user: CurrentUserDep) -> UserProfileOut:
+    organization_id = user.organization_memberships[0].organization_id
     return UserProfileOut(
         user_id=user.id,
-        organization_id=user.organization_memberships[0].organization_id
-        if user.organization_memberships
-        else None,
+        organization_id=organization_id,
         email=user.email,
         display_name=user.display_name,
         repository_config=repository_config_response(user.repository_config),

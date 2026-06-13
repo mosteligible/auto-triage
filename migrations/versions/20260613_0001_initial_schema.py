@@ -80,6 +80,50 @@ def upgrade() -> None:
     )
 
     op.create_table(
+        "user_environment_settings",
+        sa.Column("id", sa.String(length=32), nullable=False),
+        sa.Column("organization_id", sa.String(length=32), nullable=False),
+        sa.Column("user_id", sa.String(length=32), nullable=False),
+        sa.Column("api_base_url", sa.String(length=1024), nullable=False),
+        sa.Column("public_webhook_base_url", sa.String(length=1024), nullable=True),
+        sa.Column("logfire_region", sa.String(length=16), nullable=False),
+        sa.Column("alert_window_minutes", sa.Integer(), nullable=False),
+        sa.Column("openai_model", sa.String(length=256), nullable=False),
+        sa.Column("openai_api_key", sa.Text(), nullable=True),
+        sa.Column("azure_openai_endpoint", sa.String(length=1024), nullable=True),
+        sa.Column("azure_openai_deployment", sa.String(length=256), nullable=True),
+        sa.Column("azure_openai_api_version", sa.String(length=128), nullable=True),
+        sa.Column("azure_openai_api_key", sa.Text(), nullable=True),
+        sa.Column("postgres_host", sa.String(length=256), nullable=True),
+        sa.Column("postgres_port", sa.Integer(), nullable=False),
+        sa.Column("postgres_user", sa.String(length=256), nullable=True),
+        sa.Column("postgres_password", sa.Text(), nullable=True),
+        sa.Column("postgres_db", sa.String(length=256), nullable=True),
+        sa.Column("redis_enabled", sa.Boolean(), nullable=False),
+        sa.Column("redis_host", sa.String(length=256), nullable=True),
+        sa.Column("redis_port", sa.Integer(), nullable=False),
+        sa.Column("redis_username", sa.String(length=256), nullable=True),
+        sa.Column("redis_password", sa.Text(), nullable=True),
+        sa.Column("redis_ttl_seconds", sa.Integer(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"]),
+        sa.ForeignKeyConstraint(["user_id"], ["triage_users.id"]),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("organization_id", "user_id", name="uq_user_env_settings_org_user"),
+    )
+    op.create_index(
+        op.f("ix_user_environment_settings_organization_id"),
+        "user_environment_settings",
+        ["organization_id"],
+    )
+    op.create_index(
+        op.f("ix_user_environment_settings_user_id"),
+        "user_environment_settings",
+        ["user_id"],
+    )
+
+    op.create_table(
         "user_repository_configs",
         sa.Column("id", sa.String(length=32), nullable=False),
         sa.Column("user_id", sa.String(length=32), nullable=False),
@@ -264,6 +308,12 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_user_repository_configs_user_id"), "user_repository_configs")
     op.drop_index(op.f("ix_user_repository_configs_organization_id"), "user_repository_configs")
     op.drop_table("user_repository_configs")
+    op.drop_index(op.f("ix_user_environment_settings_user_id"), "user_environment_settings")
+    op.drop_index(
+        op.f("ix_user_environment_settings_organization_id"),
+        "user_environment_settings",
+    )
+    op.drop_table("user_environment_settings")
     op.drop_index(op.f("ix_organization_memberships_user_id"), "organization_memberships")
     op.drop_index(op.f("ix_organization_memberships_role"), "organization_memberships")
     op.drop_index(

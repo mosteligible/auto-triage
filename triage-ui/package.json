@@ -10,14 +10,19 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@trpc/client": "^11.17.0",
+    "@trpc/server": "^11.17.0",
     "lucide-react": "latest",
     "next": "latest",
+    "pg": "^8.21.0",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
     "@types/node": "latest",
+    "@types/pg": "^8.20.0",
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "eslint": "latest",

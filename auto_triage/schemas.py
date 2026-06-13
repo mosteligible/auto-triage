@@ -131,7 +131,7 @@ class UserRepositoryConfigOut(BaseModel):
 
 class UserProfileOut(BaseModel):
     user_id: str
-    organization_id: str | None
+    organization_id: str
     email: str
     display_name: str | None
     repository_config: UserRepositoryConfigOut | None
