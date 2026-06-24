@@ -51,6 +51,34 @@ class CacheClient:
         finally:
             await client.aclose()
 
+    async def delete(self, *keys: str) -> None:
+        keys = tuple(key for key in keys if key)
+        if not self.settings.redis_cache_enabled or not keys:
+            return
+
+        client = self._client()
+        try:
+            await client.delete(*keys)
+        except RedisError:
+            logger.warning("redis cache delete failed", exc_info=True)
+        finally:
+            await client.aclose()
+
+    async def delete_pattern(self, *patterns: str) -> None:
+        patterns = tuple(pattern for pattern in patterns if pattern)
+        if not self.settings.redis_cache_enabled or not patterns:
+            return
+
+        client = self._client()
+        try:
+            for pattern in patterns:
+                async for key in client.scan_iter(match=pattern, count=100):
+                    await client.delete(key)
+        except RedisError:
+            logger.warning("redis cache pattern delete failed", exc_info=True)
+        finally:
+            await client.aclose()
+
     def _client(self) -> Redis:
         if self.settings.redis_url:
             return Redis.from_url(

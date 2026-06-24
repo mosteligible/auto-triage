@@ -7,12 +7,15 @@ from typing import Any
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    false,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -59,7 +62,13 @@ class Organization(Base):
     repository_configs: Mapped[list[UserRepositoryConfig]] = relationship(
         back_populates="organization", cascade="all, delete-orphan"
     )
-    environment_settings: Mapped[list[UserEnvironmentSettings]] = relationship(
+    environment_settings: Mapped[OrganizationEnvironmentSettings | None] = relationship(
+        back_populates="organization", cascade="all, delete-orphan", uselist=False
+    )
+    setup_outputs: Mapped[OrganizationSetupOutputs | None] = relationship(
+        back_populates="organization", cascade="all, delete-orphan", uselist=False
+    )
+    environment_variables: Mapped[list[OrganizationEnvironmentVariable]] = relationship(
         back_populates="organization", cascade="all, delete-orphan"
     )
 
@@ -68,12 +77,13 @@ class OrganizationMembership(Base):
     __tablename__ = "organization_memberships"
     __table_args__ = (
         UniqueConstraint("organization_id", "user_id", name="uq_org_membership_org_user"),
+        CheckConstraint("role IN ('admin', 'write', 'read')", name="ck_org_membership_role"),
     )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("triage_users.id"), unique=True, index=True)
-    role: Mapped[str] = mapped_column(String(64), default="owner", index=True)
+    role: Mapped[str] = mapped_column(String(64), default="read", server_default="read", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -85,10 +95,17 @@ class OrganizationMembership(Base):
 
 class TriageUser(Base):
     __tablename__ = "triage_users"
+    __table_args__ = (
+        CheckConstraint("platform_role IN ('admin', 'user')", name="ck_triage_users_platform_role"),
+    )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     display_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    github_id: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
+    github_login: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    github_avatar_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    platform_role: Mapped[str] = mapped_column(String(64), default="user", server_default="user")
     password_hash: Mapped[str] = mapped_column(String(512))
     auth_token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -102,8 +119,8 @@ class TriageUser(Base):
     organization_memberships: Mapped[list[OrganizationMembership]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
-    environment_settings: Mapped[UserEnvironmentSettings | None] = relationship(
-        back_populates="user", cascade="all, delete-orphan", uselist=False
+    updated_environment_variables: Mapped[list[OrganizationEnvironmentVariable]] = relationship(
+        back_populates="updated_by_user"
     )
 
 
@@ -138,15 +155,12 @@ class UserRepositoryConfig(Base):
     organization: Mapped[Organization] = relationship(back_populates="repository_configs")
 
 
-class UserEnvironmentSettings(Base):
-    __tablename__ = "user_environment_settings"
-    __table_args__ = (
-        UniqueConstraint("organization_id", "user_id", name="uq_user_env_settings_org_user"),
-    )
+class OrganizationEnvironmentSettings(Base):
+    __tablename__ = "organization_environment_settings"
+    __table_args__ = (UniqueConstraint("organization_id", name="uq_org_env_settings_org"),)
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
-    user_id: Mapped[str] = mapped_column(ForeignKey("triage_users.id"), index=True)
     api_base_url: Mapped[str] = mapped_column(String(1024), default="http://127.0.0.1:8001")
     public_webhook_base_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     logfire_region: Mapped[str] = mapped_column(String(16), default="us")
@@ -174,7 +188,67 @@ class UserEnvironmentSettings(Base):
     )
 
     organization: Mapped[Organization] = relationship(back_populates="environment_settings")
-    user: Mapped[TriageUser] = relationship(back_populates="environment_settings")
+
+
+class OrganizationSetupOutputs(Base):
+    __tablename__ = "organization_setup_outputs"
+    __table_args__ = (UniqueConstraint("organization_id", name="uq_org_setup_outputs_org"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    webhook_url: Mapped[str] = mapped_column(Text, default="", server_default="")
+    env_file: Mapped[str] = mapped_column(Text, default="", server_default="")
+    logfire_query: Mapped[str] = mapped_column(Text, default="", server_default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    organization: Mapped[Organization] = relationship(back_populates="setup_outputs")
+
+
+class OrganizationEnvironmentVariable(Base):
+    __tablename__ = "organization_environment_variables"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "name", name="uq_org_environment_variable_name"),
+        CheckConstraint(
+            "NOT sensitive OR value = ''",
+            name="ck_org_environment_variables_sensitive_plaintext",
+        ),
+        CheckConstraint(
+            "encrypted_value IS NULL OR sensitive",
+            name="ck_org_environment_variables_encrypted_sensitive",
+        ),
+        CheckConstraint(
+            "encrypted_value IS NULL OR encryption_provider = 'openbao'",
+            name="ck_org_environment_variables_encryption_provider",
+        ),
+        ForeignKeyConstraint(
+            ["organization_id", "updated_by_user_id"],
+            ["organization_memberships.organization_id", "organization_memberships.user_id"],
+            name="fk_org_environment_variables_membership",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    updated_by_user_id: Mapped[str] = mapped_column(ForeignKey("triage_users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(256))
+    value: Mapped[str] = mapped_column(Text, default="", server_default="")
+    encrypted_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    encryption_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    encryption_key_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    sensitive: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    position: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    organization: Mapped[Organization] = relationship(back_populates="environment_variables")
+    updated_by_user: Mapped[TriageUser] = relationship(
+        back_populates="updated_environment_variables"
+    )
 
 
 class Incident(Base):
@@ -197,9 +271,7 @@ class Incident(Base):
     trace_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     exception_type: Mapped[str | None] = mapped_column(String(256), nullable=True)
     status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    status: Mapped[str] = mapped_column(
-        String(32), default=IncidentStatus.QUEUED.value, index=True
-    )
+    status: Mapped[str] = mapped_column(String(32), default=IncidentStatus.QUEUED.value, index=True)
     occurrence_count: Mapped[int] = mapped_column(Integer, default=1)
     raw_payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     normalized: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

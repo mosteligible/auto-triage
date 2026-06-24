@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from auto_triage.accounts import (
-    get_environment_settings_for_config,
+    get_organization_settings_for_config,
     get_user_config_by_id,
     settings_for_repository_config,
 )
@@ -24,6 +24,10 @@ from auto_triage.models import (
     IncidentStatus,
     JobStatus,
     TriageJob,
+)
+from auto_triage.organization_environment import (
+    get_runtime_environment_values,
+    resolve_configuration_secrets,
 )
 from auto_triage.schemas import NormalizedIncident
 from auto_triage.services.codebase import CodebaseInspector
@@ -125,23 +129,45 @@ class TriageWorker:
             job = result.scalar_one()
             incident_model = job.incident
             normalized = NormalizedIncident.model_validate(incident_model.normalized)
-            user_config = await get_user_config_by_id(session, normalized.user_config_id)
+            user_config = await get_user_config_by_id(
+                session, normalized.user_config_id, self.settings
+            )
             if normalized.user_config_id and user_config is None:
                 raise RuntimeError(
                     f"user repository config disappeared: {normalized.user_config_id}"
                 )
-            environment_settings = await get_environment_settings_for_config(session, user_config)
+            environment_settings = await get_organization_settings_for_config(
+                session, user_config, self.settings
+            )
+            runtime_environment = (
+                await get_runtime_environment_values(
+                    session,
+                    user_config.organization_id,
+                    self.settings,
+                )
+                if user_config is not None
+                else {}
+            )
+            resolved_config, resolved_environment_settings = (
+                await resolve_configuration_secrets(
+                    self.settings,
+                    user_config.organization_id,
+                    user_config,
+                    environment_settings,
+                )
+                if user_config is not None
+                else (None, None)
+            )
             effective_settings = settings_for_repository_config(
                 self.settings,
-                user_config,
-                environment_settings,
+                resolved_config,
+                resolved_environment_settings,
+                runtime_environment,
             )
 
         logfire_evidence = await LogfireClient(effective_settings).fetch_evidence(normalized)
         logfire_records = [
-            record
-            for record in logfire_evidence.get("records", [])
-            if isinstance(record, dict)
+            record for record in logfire_evidence.get("records", []) if isinstance(record, dict)
         ]
         codebase_evidence = await CodebaseInspector(effective_settings).inspect(
             incident_model.id,
@@ -232,9 +258,7 @@ class TriageWorker:
                         incident_id=incident.id,
                         repo=effective_settings.github_repo or "",
                         branch=pull_head.get("ref", ""),
-                        base_branch=pull_base.get(
-                            "ref", effective_settings.github_default_branch
-                        ),
+                        base_branch=pull_base.get("ref", effective_settings.github_default_branch),
                         pull_number=pull_response["number"],
                         pull_url=pull_response["html_url"],
                         state=pull_response.get("state", "open"),
@@ -242,9 +266,7 @@ class TriageWorker:
                 )
                 incident.status = IncidentStatus.PULL_REQUEST_OPENED.value
             else:
-                existing_pull_request.branch = pull_head.get(
-                    "ref", existing_pull_request.branch
-                )
+                existing_pull_request.branch = pull_head.get("ref", existing_pull_request.branch)
                 existing_pull_request.base_branch = pull_base.get(
                     "ref", existing_pull_request.base_branch
                 )

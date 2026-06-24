@@ -38,6 +38,37 @@ services:
       timeout: 5s
       retries: 20
 
+  openbao:
+    image: openbao/openbao:2.5.0
+    cap_add:
+      - IPC_LOCK
+    environment:
+      BAO_ADDR: http://127.0.0.1:8200
+      OPENBAO_AUTH_MOUNT: ${OPENBAO_AUTH_MOUNT:-approle}
+      OPENBAO_TRANSIT_MOUNT: ${OPENBAO_TRANSIT_MOUNT:-transit}
+      OPENBAO_TRANSIT_KEY: ${OPENBAO_TRANSIT_KEY:-auto-triage}
+    entrypoint: ["/bin/sh", "/openbao/config/entrypoint.sh"]
+    expose:
+      - "8200"
+    volumes:
+      - openbao-data:/openbao/data
+      - openbao-bootstrap:/openbao/bootstrap
+      - openbao-app-credentials:/openbao/app-credentials
+      - openbao-audit:/openbao/audit
+      - ./docker/openbao/openbao.hcl:/openbao/config/openbao.hcl:ro
+      - ./docker/openbao/auto-triage-policy.hcl:/openbao/config/auto-triage-policy.hcl:ro
+      - ./docker/openbao/entrypoint.sh:/openbao/config/entrypoint.sh:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "bao status >/dev/null 2>&1 && test -f /openbao/app-credentials/ready",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
   auto_triage:
     build:
       context: .
@@ -46,6 +77,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      openbao:
         condition: service_healthy
     environment:
       ENVIRONMENT: docker
@@ -62,6 +95,14 @@ services:
       REDIS_USERNAME: ${REDIS_USERNAME:-auto_triage}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-auto_triage_redis_password}
       REDIS_CACHE_TTL_SECONDS: ${REDIS_CACHE_TTL_SECONDS:-300}
+      OPENBAO_ENABLED: ${OPENBAO_ENABLED:-true}
+      OPENBAO_ADDR: ${OPENBAO_ADDR:-http://openbao:8200}
+      OPENBAO_AUTH_MOUNT: ${OPENBAO_AUTH_MOUNT:-approle}
+      OPENBAO_TRANSIT_MOUNT: ${OPENBAO_TRANSIT_MOUNT:-transit}
+      OPENBAO_TRANSIT_KEY: ${OPENBAO_TRANSIT_KEY:-auto-triage}
+      OPENBAO_ROLE_ID_FILE: ${OPENBAO_ROLE_ID_FILE:-/run/openbao/role-id}
+      OPENBAO_SECRET_ID_FILE: ${OPENBAO_SECRET_ID_FILE:-/run/openbao/secret-id}
+      OPENBAO_TIMEOUT_SECONDS: ${OPENBAO_TIMEOUT_SECONDS:-5}
       LOGFIRE_BASE_URL: ${LOGFIRE_BASE_URL:-https://logfire-us.pydantic.dev}
       LOGFIRE_READ_TOKEN: ${LOGFIRE_READ_TOKEN:-}
       LOGFIRE_PROJECT_URL: ${LOGFIRE_PROJECT_URL:-}
@@ -83,12 +124,44 @@ services:
       - "${AUTO_TRIAGE_PORT:-8001}:8001"
     volumes:
       - auto-triage-work:/tmp/auto-triage-work
+      - openbao-app-credentials:/run/openbao:ro
     command:
       [
         "/bin/sh",
         "-c",
         "alembic upgrade head && uvicorn auto_triage.app:app --host 0.0.0.0 --port 8001",
       ]
+
+  triage_ui:
+    build:
+      context: ./triage-ui
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_AUTO_TRIAGE_API_URL: ${NEXT_PUBLIC_AUTO_TRIAGE_API_URL:-http://auto_triage:8001}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auto_triage:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-auto_triage}:${POSTGRES_PASSWORD:-auto_triage_password}@postgres:5432/${POSTGRES_DB:-auto_triage}
+      AUTO_TRIAGE_API_URL: http://auto_triage:8001
+      NEXT_PUBLIC_AUTO_TRIAGE_API_URL: ${NEXT_PUBLIC_AUTO_TRIAGE_API_URL:-http://auto_triage:8001}
+      TRIAGE_UI_PUBLIC_ORIGIN: ${TRIAGE_UI_PUBLIC_ORIGIN:-}
+      GITHUB_AUTH_KIND: ${GITHUB_AUTH_KIND:-github_app}
+      GITHUB_APP_CLIENT_ID: ${GITHUB_APP_CLIENT_ID:-}
+      GITHUB_APP_CLIENT_SECRET: ${GITHUB_APP_CLIENT_SECRET:-}
+      GITHUB_APP_REDIRECT_URI: ${GITHUB_APP_REDIRECT_URI:-}
+      GITHUB_APP_STATE_SECRET: ${GITHUB_APP_STATE_SECRET:-}
+      TRIAGE_UI_PLATFORM_ADMIN_EMAILS: ${TRIAGE_UI_PLATFORM_ADMIN_EMAILS:-}
+      TRIAGE_UI_PLATFORM_ADMIN_GITHUB_LOGINS: ${TRIAGE_UI_PLATFORM_ADMIN_GITHUB_LOGINS:-}
+      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:-}
+      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:-}
+      GITHUB_OAUTH_REDIRECT_URI: ${GITHUB_OAUTH_REDIRECT_URI:-}
+      GITHUB_OAUTH_STATE_SECRET: ${GITHUB_OAUTH_STATE_SECRET:-}
+    ports:
+      - "${TRIAGE_UI_PORT:-3000}:3000"
 
   test_app:
     build:
@@ -104,4 +177,8 @@ services:
 volumes:
   postgres-data:
   redis-data:
+  openbao-data:
+  openbao-bootstrap:
+  openbao-app-credentials:
+  openbao-audit:
   auto-triage-work:

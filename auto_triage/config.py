@@ -33,6 +33,15 @@ class Settings(BaseSettings):
     redis_timeout_seconds: float = 2.0
     redis_cache_ttl_seconds: int = 300
 
+    openbao_enabled: bool = False
+    openbao_addr: str = "http://127.0.0.1:8200"
+    openbao_auth_mount: str = "approle"
+    openbao_transit_mount: str = "transit"
+    openbao_transit_key: str = "auto-triage"
+    openbao_role_id_file: Path = Path("/run/openbao/role-id")
+    openbao_secret_id_file: Path = Path("/run/openbao/secret-id")
+    openbao_timeout_seconds: float = 5.0
+
     logfire_base_url: str = "https://logfire-us.pydantic.dev"
     logfire_read_token: SecretStr | None = None
     logfire_project_url: str | None = None
@@ -64,7 +73,12 @@ class Settings(BaseSettings):
     max_snippet_lines: int = 80
     max_file_bytes: int = 300_000
 
-    @field_validator("logfire_base_url", "github_api_base_url", "azure_openai_endpoint")
+    @field_validator(
+        "logfire_base_url",
+        "github_api_base_url",
+        "azure_openai_endpoint",
+        "openbao_addr",
+    )
     @classmethod
     def strip_url_slash(cls, value: str | None) -> str | None:
         if value is None:

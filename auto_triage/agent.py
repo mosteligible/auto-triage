@@ -104,8 +104,15 @@ class TriageAgent:
             )
 
         openai_key = secret_value(self.settings.openai_api_key)
-        if openai_key:
-            os.environ.setdefault("OPENAI_API_KEY", openai_key)
-        elif not os.environ.get("OPENAI_API_KEY"):
+        if not openai_key:
+            openai_key = os.environ.get("OPENAI_API_KEY")
+        if not openai_key:
             raise RuntimeError("OPENAI_API_KEY is required when ai_provider=openai")
-        return self.settings.effective_openai_model
+        return OpenAIChatModel(
+            self._openai_model_name(),
+            provider=OpenAIProvider(api_key=openai_key),
+        )
+
+    def _openai_model_name(self) -> str:
+        model = self.settings.effective_openai_model
+        return model.removeprefix("openai:")

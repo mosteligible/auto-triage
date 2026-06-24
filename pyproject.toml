@@ -25,6 +25,7 @@ auto-triage = "auto_triage.__main__:main"
 
 [dependency-groups]
 dev = [
+    "pre-commit>=4.6.0",
     "ruff>=0.12.0",
 ]
 

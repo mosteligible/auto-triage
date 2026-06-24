@@ -34,13 +34,22 @@ def upgrade() -> None:
         sa.Column("id", sa.String(length=32), nullable=False),
         sa.Column("email", sa.String(length=320), nullable=False),
         sa.Column("display_name", sa.String(length=256), nullable=True),
+        sa.Column("github_id", sa.String(length=64), nullable=True),
+        sa.Column("github_login", sa.String(length=256), nullable=True),
+        sa.Column("github_avatar_url", sa.String(length=1024), nullable=True),
+        sa.Column("platform_role", sa.String(length=64), server_default="user", nullable=False),
         sa.Column("password_hash", sa.String(length=512), nullable=False),
         sa.Column("auth_token_hash", sa.String(length=128), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.CheckConstraint(
+            "platform_role IN ('admin', 'user')",
+            name="ck_triage_users_platform_role",
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("auth_token_hash"),
         sa.UniqueConstraint("email"),
+        sa.UniqueConstraint("github_id"),
     )
     op.create_index(
         op.f("ix_triage_users_auth_token_hash"),
@@ -49,17 +58,19 @@ def upgrade() -> None:
         unique=True,
     )
     op.create_index(op.f("ix_triage_users_email"), "triage_users", ["email"], unique=True)
+    op.create_index(op.f("ix_triage_users_github_id"), "triage_users", ["github_id"], unique=True)
 
     op.create_table(
         "organization_memberships",
         sa.Column("id", sa.String(length=32), nullable=False),
         sa.Column("organization_id", sa.String(length=32), nullable=False),
         sa.Column("user_id", sa.String(length=32), nullable=False),
-        sa.Column("role", sa.String(length=64), nullable=False),
+        sa.Column("role", sa.String(length=64), server_default="read", nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"]),
         sa.ForeignKeyConstraint(["user_id"], ["triage_users.id"]),
+        sa.CheckConstraint("role IN ('admin', 'write', 'read')", name="ck_org_membership_role"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("organization_id", "user_id", name="uq_org_membership_org_user"),
     )
@@ -80,10 +91,9 @@ def upgrade() -> None:
     )
 
     op.create_table(
-        "user_environment_settings",
+        "organization_environment_settings",
         sa.Column("id", sa.String(length=32), nullable=False),
         sa.Column("organization_id", sa.String(length=32), nullable=False),
-        sa.Column("user_id", sa.String(length=32), nullable=False),
         sa.Column("api_base_url", sa.String(length=1024), nullable=False),
         sa.Column("public_webhook_base_url", sa.String(length=1024), nullable=True),
         sa.Column("logfire_region", sa.String(length=16), nullable=False),
@@ -108,19 +118,93 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"]),
-        sa.ForeignKeyConstraint(["user_id"], ["triage_users.id"]),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("organization_id", "user_id", name="uq_user_env_settings_org_user"),
+        sa.UniqueConstraint("organization_id", name="uq_org_env_settings_org"),
     )
     op.create_index(
-        op.f("ix_user_environment_settings_organization_id"),
-        "user_environment_settings",
+        op.f("ix_organization_environment_settings_organization_id"),
+        "organization_environment_settings",
+        ["organization_id"],
+    )
+
+    op.create_table(
+        "organization_setup_outputs",
+        sa.Column("id", sa.String(length=32), nullable=False),
+        sa.Column("organization_id", sa.String(length=32), nullable=False),
+        sa.Column("webhook_url", sa.Text(), server_default="", nullable=False),
+        sa.Column("env_file", sa.Text(), server_default="", nullable=False),
+        sa.Column("logfire_query", sa.Text(), server_default="", nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"]),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("organization_id", name="uq_org_setup_outputs_org"),
+    )
+    op.create_index(
+        op.f("ix_organization_setup_outputs_organization_id"),
+        "organization_setup_outputs",
+        ["organization_id"],
+    )
+
+    op.create_table(
+        "organization_environment_variables",
+        sa.Column("id", sa.String(length=32), nullable=False),
+        sa.Column("organization_id", sa.String(length=32), nullable=False),
+        sa.Column("updated_by_user_id", sa.String(length=32), nullable=False),
+        sa.Column("name", sa.String(length=256), nullable=False),
+        sa.Column("value", sa.Text(), server_default="", nullable=False),
+        sa.Column("encrypted_value", sa.Text(), nullable=True),
+        sa.Column("encryption_provider", sa.String(length=32), nullable=True),
+        sa.Column("encryption_key_name", sa.String(length=256), nullable=True),
+        sa.Column("sensitive", sa.Boolean(), server_default=sa.false(), nullable=False),
+        sa.Column("position", sa.Integer(), server_default="0", nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"]),
+        sa.ForeignKeyConstraint(["updated_by_user_id"], ["triage_users.id"]),
+        sa.ForeignKeyConstraint(
+            ["organization_id", "updated_by_user_id"],
+            ["organization_memberships.organization_id", "organization_memberships.user_id"],
+            name="fk_org_environment_variables_membership",
+        ),
+        sa.CheckConstraint(
+            "NOT sensitive OR value = ''",
+            name="ck_org_environment_variables_sensitive_plaintext",
+        ),
+        sa.CheckConstraint(
+            "encrypted_value IS NULL OR sensitive",
+            name="ck_org_environment_variables_encrypted_sensitive",
+        ),
+        sa.CheckConstraint(
+            "encrypted_value IS NULL OR encryption_provider = 'openbao'",
+            name="ck_org_environment_variables_encryption_provider",
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint(
+            "organization_id",
+            "name",
+            name="uq_org_environment_variable_name",
+        ),
+    )
+    op.create_index(
+        op.f("ix_organization_environment_variables_organization_id"),
+        "organization_environment_variables",
         ["organization_id"],
     )
     op.create_index(
-        op.f("ix_user_environment_settings_user_id"),
-        "user_environment_settings",
-        ["user_id"],
+        op.f("ix_organization_environment_variables_updated_by_user_id"),
+        "organization_environment_variables",
+        ["updated_by_user_id"],
     )
 
     op.create_table(
@@ -308,12 +392,25 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_user_repository_configs_user_id"), "user_repository_configs")
     op.drop_index(op.f("ix_user_repository_configs_organization_id"), "user_repository_configs")
     op.drop_table("user_repository_configs")
-    op.drop_index(op.f("ix_user_environment_settings_user_id"), "user_environment_settings")
     op.drop_index(
-        op.f("ix_user_environment_settings_organization_id"),
-        "user_environment_settings",
+        op.f("ix_organization_environment_settings_organization_id"),
+        "organization_environment_settings",
     )
-    op.drop_table("user_environment_settings")
+    op.drop_index(
+        op.f("ix_organization_setup_outputs_organization_id"),
+        "organization_setup_outputs",
+    )
+    op.drop_table("organization_setup_outputs")
+    op.drop_index(
+        op.f("ix_organization_environment_variables_updated_by_user_id"),
+        "organization_environment_variables",
+    )
+    op.drop_index(
+        op.f("ix_organization_environment_variables_organization_id"),
+        "organization_environment_variables",
+    )
+    op.drop_table("organization_environment_variables")
+    op.drop_table("organization_environment_settings")
     op.drop_index(op.f("ix_organization_memberships_user_id"), "organization_memberships")
     op.drop_index(op.f("ix_organization_memberships_role"), "organization_memberships")
     op.drop_index(
@@ -323,6 +420,7 @@ def downgrade() -> None:
     op.drop_table("organization_memberships")
     op.drop_index(op.f("ix_triage_users_email"), "triage_users")
     op.drop_index(op.f("ix_triage_users_auth_token_hash"), "triage_users")
+    op.drop_index(op.f("ix_triage_users_github_id"), "triage_users")
     op.drop_table("triage_users")
     op.drop_index(op.f("ix_organizations_slug"), "organizations")
     op.drop_table("organizations")

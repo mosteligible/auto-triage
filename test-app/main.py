@@ -15,6 +15,7 @@ load_dotenv(SERVER_DIR / ".env")
 
 SERVICE_NAME = os.getenv("LOGFIRE_SERVICE_NAME", "test-app-failure-generator")
 ENVIRONMENT = os.getenv("LOGFIRE_ENVIRONMENT", "local")
+LOGFIRE_TOKEN = os.getenv("LOGFIRE_TOKEN")
 
 counter_lock = Lock()
 
@@ -22,6 +23,10 @@ app = FastAPI(title="Logfire Failure Generator", version="0.1.0")
 
 
 def _instrument_app(app: FastAPI) -> None:
+    if not LOGFIRE_TOKEN:
+        print("LOGFIRE_TOKEN is not set; running without Logfire export", flush=True)
+        return
+
     logfire.configure(
         send_to_logfire=True,
         service_name=SERVICE_NAME,

@@ -1,0 +1,83 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model OrganizationEnvironmentSettings {
+  id                     String   @id @db.VarChar(32)
+  organizationId         String   @unique(map: "uq_org_env_settings_org") @map("organization_id") @db.VarChar(32)
+  apiBaseUrl              String   @map("api_base_url") @db.VarChar(1024)
+  publicWebhookBaseUrl    String?  @map("public_webhook_base_url") @db.VarChar(1024)
+  logfireRegion           String   @map("logfire_region") @db.VarChar(16)
+  alertWindowMinutes      Int      @map("alert_window_minutes")
+  openaiModel             String   @map("openai_model") @db.VarChar(256)
+  openaiApiKey            String?  @map("openai_api_key") @db.Text
+  azureOpenaiEndpoint     String?  @map("azure_openai_endpoint") @db.VarChar(1024)
+  azureOpenaiDeployment   String?  @map("azure_openai_deployment") @db.VarChar(256)
+  azureOpenaiApiVersion   String?  @map("azure_openai_api_version") @db.VarChar(128)
+  azureOpenaiApiKey       String?  @map("azure_openai_api_key") @db.Text
+  postgresHost            String?  @map("postgres_host") @db.VarChar(256)
+  postgresPort            Int      @map("postgres_port")
+  postgresUser            String?  @map("postgres_user") @db.VarChar(256)
+  postgresPassword        String?  @map("postgres_password") @db.Text
+  postgresDb              String?  @map("postgres_db") @db.VarChar(256)
+  redisEnabled            Boolean  @map("redis_enabled")
+  redisHost               String?  @map("redis_host") @db.VarChar(256)
+  redisPort               Int      @map("redis_port")
+  redisUsername           String?  @map("redis_username") @db.VarChar(256)
+  redisPassword           String?  @map("redis_password") @db.Text
+  redisTtlSeconds         Int      @map("redis_ttl_seconds")
+  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@index([organizationId], map: "ix_organization_environment_settings_organization_id")
+  @@map("organization_environment_settings")
+}
+
+model UserRepositoryConfig {
+  id                  String   @id @db.VarChar(32)
+  userId              String   @unique @map("user_id") @db.VarChar(32)
+  organizationId      String   @map("organization_id") @db.VarChar(32)
+  webhookId           String   @unique @map("webhook_id") @db.VarChar(64)
+  githubOwner         String   @map("github_owner") @db.VarChar(128)
+  githubRepoName      String   @map("github_repo_name") @db.VarChar(128)
+  githubToken         String   @map("github_token") @db.Text
+  githubDefaultBranch String   @map("github_default_branch") @db.VarChar(256)
+  targetRepoUrl       String?  @map("target_repo_url") @db.VarChar(1024)
+  logfireBaseUrl      String   @map("logfire_base_url") @db.VarChar(512)
+  logfireReadToken    String?  @map("logfire_read_token") @db.Text
+  logfireProjectUrl   String?  @map("logfire_project_url") @db.VarChar(1024)
+  logfireServiceName  String?  @map("logfire_service_name") @db.VarChar(256)
+  logfireRoute        String?  @map("logfire_route") @db.VarChar(512)
+  alertTrigger        String   @map("alert_trigger") @db.VarChar(64)
+  alertMode           String   @map("alert_mode") @db.VarChar(64)
+  aiProvider          String   @map("ai_provider") @db.VarChar(32)
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@index([organizationId], map: "ix_user_repository_configs_organization_id")
+  @@map("user_repository_configs")
+}
+
+model OrganizationEnvironmentVariable {
+  id              String   @id @db.VarChar(32)
+  organizationId  String   @map("organization_id") @db.VarChar(32)
+  updatedByUserId String   @map("updated_by_user_id") @db.VarChar(32)
+  name            String   @db.VarChar(256)
+  value           String   @default("") @db.Text
+  encryptedValue  String?  @map("encrypted_value") @db.Text
+  encryptionProvider String? @map("encryption_provider") @db.VarChar(32)
+  encryptionKeyName String? @map("encryption_key_name") @db.VarChar(256)
+  sensitive       Boolean  @default(false)
+  position        Int      @default(0)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([organizationId, name], map: "uq_org_environment_variable_name")
+  @@index([organizationId], map: "ix_organization_environment_variables_organization_id")
+  @@index([updatedByUserId], map: "ix_organization_environment_variables_updated_by_user_id")
+  @@map("organization_environment_variables")
+}

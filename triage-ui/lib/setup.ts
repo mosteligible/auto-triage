@@ -1,15 +1,26 @@
 export type AiProvider = "azure" | "openai";
 export type AlertTrigger = "exception" | "http_5xx" | "error_rate";
 export type AlertMode = "has_results" | "starts_having_results" | "results_change";
+export type OrganizationRole = "admin" | "write" | "read";
+export type PlatformRole = "admin" | "user";
 
 export type SetupConfig = {
   apiBaseUrl: string;
   userEmail: string;
   userPassword: string;
   userDisplayName: string;
+  githubLogin: string;
   authToken: string;
   userId: string;
   organizationId: string;
+  organizationName: string;
+  organizationSlug: string;
+  organizationRole: OrganizationRole;
+  platformRole: PlatformRole;
+  memberEmail: string;
+  memberPassword: string;
+  memberDisplayName: string;
+  memberRole: OrganizationRole;
   webhookPath: string;
   webhookId: string;
   publicWebhookBaseUrl: string;
@@ -17,8 +28,10 @@ export type SetupConfig = {
   githubDefaultBranch: string;
   targetRepoUrl: string;
   githubToken: string;
+  githubTokenConfigured: boolean;
   logfireRegion: "us" | "eu";
   logfireReadToken: string;
+  logfireReadTokenConfigured: boolean;
   logfireProjectUrl: string;
   logfireServiceName: string;
   logfireRoute: string;
@@ -28,20 +41,24 @@ export type SetupConfig = {
   aiProvider: AiProvider;
   openaiModel: string;
   openaiApiKey: string;
+  openaiApiKeyConfigured: boolean;
   azureEndpoint: string;
   azureDeployment: string;
   azureApiVersion: string;
   azureApiKey: string;
+  azureApiKeyConfigured: boolean;
   postgresHost: string;
   postgresPort: string;
   postgresUser: string;
   postgresPassword: string;
+  postgresPasswordConfigured: boolean;
   postgresDb: string;
   redisEnabled: boolean;
   redisHost: string;
   redisPort: string;
   redisUsername: string;
   redisPassword: string;
+  redisPasswordConfigured: boolean;
   redisTtlSeconds: string;
 };
 
@@ -50,9 +67,18 @@ export const defaultSetupConfig: SetupConfig = {
   userEmail: "operator@example.com",
   userPassword: "change-me-now",
   userDisplayName: "Operator",
+  githubLogin: "",
   authToken: "",
   userId: "",
   organizationId: "",
+  organizationName: "Acme Engineering",
+  organizationSlug: "",
+  organizationRole: "read",
+  platformRole: "user",
+  memberEmail: "",
+  memberPassword: "",
+  memberDisplayName: "",
+  memberRole: "read",
   webhookPath: "",
   webhookId: "",
   publicWebhookBaseUrl: "",
@@ -60,8 +86,10 @@ export const defaultSetupConfig: SetupConfig = {
   githubDefaultBranch: "main",
   targetRepoUrl: "https://github.com/owner/repo.git",
   githubToken: "",
+  githubTokenConfigured: false,
   logfireRegion: "us",
   logfireReadToken: "",
+  logfireReadTokenConfigured: false,
   logfireProjectUrl: "",
   logfireServiceName: "test-app-failure-generator",
   logfireRoute: "/lean",
@@ -71,20 +99,24 @@ export const defaultSetupConfig: SetupConfig = {
   aiProvider: "azure",
   openaiModel: "openai:gpt-4.1-mini",
   openaiApiKey: "",
+  openaiApiKeyConfigured: false,
   azureEndpoint: "",
   azureDeployment: "",
   azureApiVersion: "",
   azureApiKey: "",
+  azureApiKeyConfigured: false,
   postgresHost: "postgres",
   postgresPort: "5432",
   postgresUser: "auto_triage",
   postgresPassword: "auto_triage_password",
+  postgresPasswordConfigured: false,
   postgresDb: "auto_triage",
   redisEnabled: true,
   redisHost: "redis",
   redisPort: "6379",
   redisUsername: "auto_triage",
   redisPassword: "auto_triage_redis_password",
+  redisPasswordConfigured: false,
   redisTtlSeconds: "300",
 };
 
@@ -111,7 +143,7 @@ export function buildEnv(config: SetupConfig): string {
     `POSTGRES_HOST=${config.postgresHost}`,
     `POSTGRES_PORT=${config.postgresPort}`,
     `POSTGRES_USER=${config.postgresUser}`,
-    `POSTGRES_PASSWORD=${config.postgresPassword}`,
+    `POSTGRES_PASSWORD=${secretOutput(config.postgresPassword, config.postgresPasswordConfigured)}`,
     `POSTGRES_DB=${config.postgresDb}`,
     "DATABASE_URL=",
     "",
@@ -120,24 +152,24 @@ export function buildEnv(config: SetupConfig): string {
     `REDIS_PORT=${config.redisPort}`,
     "REDIS_DB=0",
     `REDIS_USERNAME=${config.redisUsername}`,
-    `REDIS_PASSWORD=${config.redisPassword}`,
+    `REDIS_PASSWORD=${secretOutput(config.redisPassword, config.redisPasswordConfigured)}`,
     `REDIS_CACHE_TTL_SECONDS=${config.redisTtlSeconds}`,
     "",
     `LOGFIRE_BASE_URL=${logfireBaseUrl(config.logfireRegion)}`,
-    `LOGFIRE_READ_TOKEN=${config.logfireReadToken}`,
+    `LOGFIRE_READ_TOKEN=${secretOutput(config.logfireReadToken, config.logfireReadTokenConfigured)}`,
     `LOGFIRE_PROJECT_URL=${config.logfireProjectUrl}`,
     "LOGFIRE_LOOKBACK_HOURS=2",
     "",
-    `OPENAI_API_KEY=${config.openaiApiKey}`,
+    `OPENAI_API_KEY=${secretOutput(config.openaiApiKey, config.openaiApiKeyConfigured)}`,
     `TRIAGE_MODEL=${config.openaiModel}`,
     "OPENAI_TRIAGE_MODEL=",
     "",
     `AZURE_OPENAI_ENDPOINT=${config.azureEndpoint}`,
-    `AZURE_OPENAI_API_KEY=${config.azureApiKey}`,
+    `AZURE_OPENAI_API_KEY=${secretOutput(config.azureApiKey, config.azureApiKeyConfigured)}`,
     `AZURE_OPENAI_API_VERSION=${config.azureApiVersion}`,
     `AZURE_OPENAI_DEPLOYMENT=${config.azureDeployment}`,
     "",
-    `GITHUB_TOKEN=${config.githubToken}`,
+    `GITHUB_TOKEN=${secretOutput(config.githubToken, config.githubTokenConfigured)}`,
     `GITHUB_REPO=${config.githubRepo}`,
     `GITHUB_DEFAULT_BRANCH=${config.githubDefaultBranch}`,
     `TARGET_REPO_URL=${config.targetRepoUrl}`,
@@ -145,6 +177,13 @@ export function buildEnv(config: SetupConfig): string {
     "WORKSPACE_DIR=.auto-triage-work",
     "CLEANUP_REPO_AFTER_TRIAGE=true",
   ].join("\n");
+}
+
+function secretOutput(value: string, configured: boolean): string {
+  if (value) {
+    return value;
+  }
+  return configured ? "<stored-in-openbao>" : "";
 }
 
 export function buildLogfireQuery(config: SetupConfig): string {
@@ -244,6 +283,8 @@ export function buildSmokeTest(config: SetupConfig): string {
 export function setupProgress(config: SetupConfig): number {
   const checks = [
     config.apiBaseUrl,
+    config.organizationId,
+    config.organizationName,
     config.authToken,
     config.webhookPath,
     config.githubRepo,

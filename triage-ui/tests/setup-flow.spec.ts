@@ -49,7 +49,7 @@ test.afterAll(async () => {
   apiProcess?.kill("SIGTERM");
 });
 
-test("user can login, save repository setup, receive a unique webhook, and trigger an alert", async ({
+test("admin can register an organization, add a member, save setup, and trigger an alert", async ({
   page,
   request,
 }) => {
@@ -60,11 +60,23 @@ test("user can login, save repository setup, receive a unique webhook, and trigg
   await expect(page.getByText(/Healthy/)).toBeVisible();
 
   const email = `operator-${Date.now()}@example.com`;
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Login password").fill("change-me-now");
+  const organizationName = `Setup Test ${Date.now()}`;
+  await page.getByLabel("Organization name").fill(organizationName);
+  await page.getByLabel("Admin email").fill(email);
+  await page.getByLabel("Password").fill("change-me-now");
   await page.getByLabel("Display name").fill("Operator");
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.getByText(`Registration: Created ${organizationName}`)).toBeVisible();
   await expect(page.getByText(new RegExp(`Signed in as ${escapeRegExp(email)}`))).toBeVisible();
+  await expect(page.getByText("Members: 1 in " + organizationName)).toBeVisible();
+
+  const memberEmail = `member-${Date.now()}@example.com`;
+  await page.getByLabel("Member email").fill(memberEmail);
+  await page.getByLabel("Temporary password").fill("member-password");
+  await page.getByLabel("Member name").fill("Write User");
+  await page.getByLabel("Member role").selectOption("write");
+  await page.getByRole("button", { name: "Add" }).click();
+  await expect(page.getByText(`Members: Added ${memberEmail}`)).toBeVisible();
 
   await page.getByLabel("GitHub repo").fill("mosteligible/auto-triage");
   await page.getByLabel("Default branch").fill("logfire");
@@ -90,6 +102,8 @@ test("user can login, save repository setup, receive a unique webhook, and trigg
   });
   expect(profileResponse.ok()).toBeTruthy();
   const profile = await profileResponse.json();
+  expect(profile.organization_name).toBe(organizationName);
+  expect(profile.role).toBe("admin");
   expect(profile.repository_config.github_repo).toBe("mosteligible/auto-triage");
   expect(profile.repository_config.github_token_configured).toBe(true);
 
